@@ -1,5 +1,12 @@
 # SearxNG settings for the DronaCharya `dc ask` fallback.
 # json format MUST be enabled — the app queries /search?format=json.
+# Engine selection also lives HERE (SearxNG's own config). The default set
+# queries all general-category engines; to narrow it:
+#   use_default_settings:
+#     engines:
+#       keep_only: [google, duckduckgo, bing, wikipedia]
+# Fewer, high-quality engines answer faster — DronaCharya only fetches the
+# top result pages, so ranking beats breadth. Restart the container after edits.
 use_default_settings: true
 
 server:
