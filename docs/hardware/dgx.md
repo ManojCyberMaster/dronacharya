@@ -155,3 +155,9 @@ now stops profile services too (use it sparingly).
 
 `searx_url` never goes in `settings.yml`, and engine selection never goes in
 `config.toml` — each side configures its own service.
+
+**If `git pull` fails with "unable to unlink … Permission denied" on a mounted
+path** (e.g. `searxng/settings.yml`): the container wrote into the bind-mounted
+folder as its own user, so your user no longer owns the files. Fix ownership
+and retry — `sudo chown -R $USER:$USER searxng/ && git pull`. Containers only
+need read access; normal permissions are fine afterwards.
