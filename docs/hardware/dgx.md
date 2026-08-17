@@ -159,5 +159,7 @@ now stops profile services too (use it sparingly).
 **If `git pull` fails with "unable to unlink … Permission denied" on a mounted
 path** (e.g. `searxng/settings.yml`): the container wrote into the bind-mounted
 folder as its own user, so your user no longer owns the files. Fix ownership
-and retry — `sudo chown -R $USER:$USER searxng/ && git pull`. Containers only
-need read access; normal permissions are fine afterwards.
+and retry — `sudo chown -R $USER:$USER searxng/ && git pull`. Note the SearxNG
+container re-chowns the folder on every start, so this recurs — which is why
+the live `settings.yml` is untracked (git no longer cares). For manual edits
+after a container restart, use `sudo` or re-run the chown.
