@@ -231,7 +231,7 @@ copy.
 
 | File | Belongs to | What goes in it |
 |---|---|---|
-| `searxng/settings.yml` | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
+| `searxng/settings.yml` (copy of the tracked `settings.example.yml`) | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
 | `server-data/config.toml` | DronaCharya **server** (docker host) | `[server] token`, `[llm]` models, `[websearch] searx_url` |
 | `~/.dronacharya/config.toml` | DronaCharya **client** (each device) | `[deployment] role`, `[server] remote_url` + token, local `[llm]` |
 

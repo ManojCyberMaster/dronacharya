@@ -16,5 +16,7 @@ build/
 server-data/
 # built seed kits (publish as release assets, not in-tree)
 *.dckit.json
+# live searxng/settings.yml is UNTRACKED (holds your secret_key; copy it
+# from the tracked example, then git never touches it again)
 searxng/*
-!searxng/settings.yml
+!searxng/settings.example.yml

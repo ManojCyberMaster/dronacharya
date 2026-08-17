@@ -149,7 +149,7 @@ now stops profile services too (use it sparingly).
 
 | File | Belongs to | What goes in it |
 |---|---|---|
-| `searxng/settings.yml` | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
+| `searxng/settings.yml` (copied from the tracked `settings.example.yml`, then untracked like `server-data/`) | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
 | `server-data/config.toml` | DronaCharya **server** | `[server] token`, `[llm]` models, `[websearch] searx_url` |
 | `~/.dronacharya/config.toml` | DronaCharya **client** (each device) | `[deployment] role`, `[server] remote_url` + token, local `[llm]` |
 

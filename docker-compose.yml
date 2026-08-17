@@ -53,7 +53,9 @@ services:
       HF_HOME: /data/hf-cache   # embedder/reranker cache survives image rebuilds
 
   # Optional self-hosted metasearch for grounded `dc ask` internet fallback.
-  # Start with:  docker compose --profile searxng up -d
+  # First start:
+  #   cp searxng/settings.example.yml searxng/settings.yml   # then set secret_key
+  #   docker compose --profile searxng up -d
   # Then set [websearch].searx_url = "http://searxng:8080" in the app config.
   # (Called over HTTP only; SearxNG's AGPL license stays on the service.)
   searxng:
