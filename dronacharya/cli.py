@@ -491,6 +491,47 @@ def query(
 
 
 @app.command()
+def add(
+    paths: list[Path] = typer.Argument(..., help="Files or directories "
+                                       "(pdf/docx/xlsx/pptx/md/txt/tdl)"),
+    tag: list[str] = typer.Option([], "--tag", "-t", help="Tag(s) for these files"),
+):
+    """Add local documents to your knowledge base — searchable, with answers
+    referencing the file path. One-off companion to the [notes] directories
+    (which re-scan automatically via `dc sync-notes`)."""
+    from .ingest.parsers import get_parser
+    from .ingest.pipeline import save_note_file
+
+    config = load_config()
+    repo = _open_repo()
+    embedder = _embedder(config)
+    files: list[Path] = []
+    for p in paths:
+        p = p.expanduser()
+        if p.is_dir():
+            files += [f for f in sorted(p.rglob("*"))
+                      if f.is_file() and get_parser(f) is not None]
+        elif p.is_file():
+            files.append(p)
+        else:
+            console.print(f"[yellow]skipped[/yellow] {p}: not found")
+    try:
+        for f in files:
+            outcome = save_note_file(repo, embedder, config, f)
+            color = {"created": "green", "updated": "green",
+                     "unchanged": "yellow"}.get(outcome.status, "red")
+            console.print(f"[{color}]{outcome.status}[/{color}] {f}"
+                          + (f" — {outcome.message}" if outcome.status == "blocked" else ""))
+            if tag and outcome.document_id and outcome.status != "blocked":
+                existing = set(repo.get_tags(outcome.document_id))
+                repo.set_tags(outcome.document_id, sorted(existing | set(tag)))
+        if not files:
+            console.print("Nothing to add — no supported files found.")
+    finally:
+        repo.close()
+
+
+@app.command()
 def redistill():
     """Upgrade saves that only have fallback excerpts into distilled knowledge."""
     from .ingest.pipeline import redistill_document

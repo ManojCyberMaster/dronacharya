@@ -28,6 +28,11 @@ def get_parser(path: Path) -> Parser | None:
     ext = path.suffix.lower()
     if ext == ".pdf":
         return _pdf_parser()
+    if ext in (".docx", ".xlsx", ".xlsm", ".pptx"):
+        from . import office
+
+        return {".docx": office.DocxParser(), ".pptx": office.PptxParser()}.get(
+            ext, office.XlsxParser())
     return _REGISTRY.get(ext)
 
 

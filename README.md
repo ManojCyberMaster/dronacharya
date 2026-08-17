@@ -15,6 +15,7 @@ pip install -e .
 dc init                      # config + knowledge base + embedding model
 dc seed install cli-essentials.dckit.json   # optional starter knowledge (see below)
 dc save https://example.com/article --tag reading
+dc add ~/Documents/report.docx --tag work    # local files: pdf/docx/xlsx/pptx/md/txt
 dc sync-notes                # after adding note directories to the config
 dc search "that thing I read about chunking"
 dc "command line for mounting local windows drive in wsl"   # quick answer
@@ -96,7 +97,7 @@ like any other change. Deleting a document removes all its knowledge.
 
 ## Surfaces
 
-- `dc` CLI — ask (default), save, seed, tags, sync-notes, search, query, sync, export, wipe
+- `dc` CLI — ask (default), save, add (local pdf/docx/xlsx/pptx), seed, tags, sync-notes, search, query, sync, export, wipe. Local files are parsed with the stdlib (no Office libraries), and answers reference the file path — search "that revenue figure" and get `~/Documents/plan.docx · Quarterly targets` back.
 - Web UI — chat with cited answers + library (`dc serve` → http://localhost:8317)
 - Tags word map (web) — semantic map of your topics with pan/zoom, click-through browsing, editing, tag rename/delete ([docs](docs/mindmaps-graph.md))
 - Mind maps (web) — full XMind-style editor: 4 layouts (incl. hierarchical), themes, node styles/tags, per-node rich-text notes, styled cross-links, outline, focus, PNG/SVG/JSON/Markdown export; every node (and note) becomes searchable knowledge ([docs](docs/mindmaps-graph.md))

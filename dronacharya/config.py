@@ -38,7 +38,8 @@ class StorageConfig(BaseModel):
 
 class NotesConfig(BaseModel):
     directories: list[str] = Field(default_factory=list)
-    extensions: list[str] = Field(default_factory=lambda: [".tdl", ".md", ".txt", ".pdf"])
+    extensions: list[str] = Field(default_factory=lambda: [
+        ".tdl", ".md", ".txt", ".pdf", ".docx", ".xlsx", ".pptx"])
     scan: str = "poll"
     interval_seconds: int = 300
 
@@ -147,7 +148,7 @@ postgres_dsn = ""
 #   Windows:  'C:\\Users\\YourName\\Documents\\ToDoLists'
 #   mac/lin:  "~/Documents/notes"
 directories = []
-extensions = [".tdl", ".md", ".txt", ".pdf"]
+extensions = [".tdl", ".md", ".txt", ".pdf", ".docx", ".xlsx", ".pptx"]
 scan = "poll"
 interval_seconds = 300
 

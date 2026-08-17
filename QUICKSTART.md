@@ -16,6 +16,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh     # install uv (once)
 uv tool install "dronacharya[server] @ git+https://github.com/<you>/dronacharya.git"
 dc init                                             # config + KB + embedding model (one-time download)
 dc save https://en.wikipedia.org/wiki/Retrieval-augmented_generation
+dc add ~/Documents/report.docx        # local files too: pdf/docx/xlsx/pptx/md/txt
 dc search "retrieval augmented generation"
 dc serve                                            # web UI at http://localhost:8317
 ```
