@@ -23,12 +23,18 @@ and reconcile with it via `dc sync`.
    ```bash
    docker compose up -d --build
    ```
-   This runs Postgres (pgvector), Ollama (GPU), and the DronaCharya app on port 8317.
-3. **Pull a big model into Ollama:**
+   This runs Postgres (pgvector) and the DronaCharya app on port 8317. Model
+   servers are opt-in profiles — vLLM (recommended, below) or Ollama; profile
+   services must be named on every `up` that should include them.
+3. **Pick a model server.** Recommended: the vLLM profile with `gpt-oss:120b`
+   (next section). Or the simpler Ollama container:
    ```bash
-   docker compose exec ollama ollama pull llama3.3:70b     # or qwen2.5:72b
+   docker compose --profile ollama up -d
+   docker compose exec ollama ollama pull gpt-oss:120b
    ```
    Match `[llm].ollama_model` in `server-data/config.toml`, then `docker compose restart app`.
+   (If the host already runs its own Ollama on 11434, skip the container and
+   point `[llm].ollama_url` at `http://host.docker.internal:11434/v1` instead.)
 4. **Verify from the server:**
    ```bash
    curl http://localhost:8317/api/v1/status

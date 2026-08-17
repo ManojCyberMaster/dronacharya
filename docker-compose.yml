@@ -22,6 +22,7 @@ services:
 
   ollama:
     restart: unless-stopped
+    profiles: ["ollama"]   # opt-in: docker compose --profile ollama up -d
     image: ollama/ollama:latest
     volumes:
       - ollama:/root/.ollama
