@@ -123,3 +123,35 @@ Nothing in DronaCharya requires exposure beyond your LAN. If you want the
 laptop to sync from outside your home, any mechanism you already trust works
 (Tailscale, WireGuard, an SSH tunnel, a reverse proxy with TLS). This is
 entirely optional and outside the app's design.
+
+## Operating the stack: profiles and the config-file map
+
+Two lessons that save real debugging time:
+
+**Bake your standing profiles into how you invoke compose.** Profile services
+(vLLM, SearxNG, Ollama) are only in scope when their profile is named — a
+plain `docker compose up -d` after a `down` will NOT bring them back, and a
+bare `docker compose` invocation on a machine that needs an override file
+(e.g. the Spark overlay) silently uses the wrong service definitions. Set it
+once per host:
+
+```bash
+# ~/.bashrc on the server
+export COMPOSE_PROFILES=vllm,searxng
+alias dcc='docker compose -f docker-compose.yml -f docker-compose.dgx-spark.yml'
+```
+
+Then `dcc up -d --build` always manages the full stack you actually run,
+`dcc up -d --build app` stays the surgical app-only update, and `dcc down`
+now stops profile services too (use it sparingly).
+
+**Three config files that are easy to blur together:**
+
+| File | Belongs to | What goes in it |
+|---|---|---|
+| `searxng/settings.yml` | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
+| `server-data/config.toml` | DronaCharya **server** | `[server] token`, `[llm]` models, `[websearch] searx_url` |
+| `~/.dronacharya/config.toml` | DronaCharya **client** (each device) | `[deployment] role`, `[server] remote_url` + token, local `[llm]` |
+
+`searx_url` never goes in `settings.yml`, and engine selection never goes in
+`config.toml` — each side configures its own service.

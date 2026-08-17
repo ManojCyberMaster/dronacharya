@@ -227,6 +227,17 @@ produces a full zip; `dc wipe` deletes everything. Back that directory up
 like any personal data — or run the home server and let sync be your second
 copy.
 
+**Which config file does a setting go in?**
+
+| File | Belongs to | What goes in it |
+|---|---|---|
+| `searxng/settings.yml` | SearxNG itself | `use_default_settings`, `secret_key`, json format, engine selection |
+| `server-data/config.toml` | DronaCharya **server** (docker host) | `[server] token`, `[llm]` models, `[websearch] searx_url` |
+| `~/.dronacharya/config.toml` | DronaCharya **client** (each device) | `[deployment] role`, `[server] remote_url` + token, local `[llm]` |
+
+`searx_url` never goes in `settings.yml`, and engine selection never goes in
+`config.toml` — each side configures its own service.
+
 **Port 8317 is taken.**
 `[server] port = ...` in the config; the web UI, extension, and clients all
 follow the URL you give them.
