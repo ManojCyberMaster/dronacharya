@@ -24,8 +24,9 @@ and the reasoning behind the key design decisions.
    (your KB / the internet / model memory), confidence is computed rather
    than asserted, and unverifiable answers are refused by default.
 5. **Permissive licensing.** Apache-2.0, and every Python dependency is
-   permissively licensed. SearxNG (AGPL) is only ever called as a separate
-   HTTP service you host — never a code dependency.
+   permissively licensed. SearxNG (AGPL), the self-hosted metasearch
+   engine behind grounded web answers, is only ever called over HTTP as a
+   separate service you host — never a code dependency.
 
 ## 2. Component map
 
@@ -51,7 +52,7 @@ graph TB
         EMB[Embeddings<br/>sentence-transformers]
         RER[Cross-encoder reranker]
         LLM[LLM provider chain<br/>Anthropic / OpenAI / Ollama / vLLM]
-        SX[SearxNG<br/>self-hosted HTTP service]
+        SX[SearxNG<br/>self-hosted metasearch engine]
     end
     CLI --> Core
     EXT -->|REST| SRV[FastAPI server]

@@ -80,8 +80,10 @@ labeled low-confidence. Run SearxNG (self-hosted metasearch, called over HTTP
 only) and quick answers get grounded on real fetched pages:
 
 ```toml
+# ~/.dronacharya/config.toml — DronaCharya's OWN config, not searxng/settings.yml
+# (settings.yml configures SearxNG itself: secret_key + enabling the json format)
 [websearch]
-searx_url = "http://localhost:8081"    # your SearxNG instance
+searx_url = "http://localhost:8081"    # where your SearxNG instance listens
 ```
 
 Grounded high-confidence answers auto-embed into your KB with their source.
