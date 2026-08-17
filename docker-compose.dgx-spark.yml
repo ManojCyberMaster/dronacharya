@@ -1,0 +1,26 @@
+# NVIDIA DGX Spark (GB10, aarch64) overrides.
+#
+# Usage:
+#   VLLM_MODEL=openai/gpt-oss-120b \
+#   docker compose -f docker-compose.yml -f docker-compose.dgx-spark.yml \
+#     --profile vllm up -d --build
+#
+# Why these overrides: the Spark's 128 GB unified memory is shared by every
+# model, and decode speed is bound by its ~273 GB/s bandwidth — so MoE models
+# win big. gpt-oss-120b (Apache-2.0, 5.1B active params) in vLLM is both the
+# best-quality and the fastest batch option here (~860 tok/s aggregate at high
+# concurrency vs. Ollama plateauing early). Ollama is therefore parked behind
+# --profile ollama instead of running by default.
+services:
+  ollama:
+    profiles: ["ollama"]   # opt back in with --profile ollama
+
+  vllm:
+    # NVIDIA's aarch64/CUDA-13 vLLM build (the upstream vllm/vllm-openai
+    # image also works via its cu130 tags). See docs/hardware/dgx.md.
+    image: nvcr.io/nvidia/vllm:26.05-py3
+    command: ["vllm", "serve", "${VLLM_MODEL:-openai/gpt-oss-120b}",
+              "--max-model-len", "32768",
+              "--gpu-memory-utilization", "0.80",
+              "--max-num-seqs", "64",
+              "--enable-prefix-caching"]

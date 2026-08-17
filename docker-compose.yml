@@ -1,0 +1,90 @@
+# DronaCharya home server (DGX / any Linux box with docker).
+# Quick start:
+#   1. cp config.server.example.toml ./server-data/config.toml   (edit the token!)
+#   2. docker compose up -d --build
+#   3. docker compose exec ollama ollama pull llama3.3:70b       (pick per your GPU)
+# Optional max-throughput inference:  docker compose --profile vllm up -d
+services:
+  postgres:
+    restart: unless-stopped
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: dronacharya
+      POSTGRES_PASSWORD: dronacharya   # local network only; change if exposed
+      POSTGRES_DB: dronacharya
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dronacharya"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ollama:
+    restart: unless-stopped
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    # GPU access (NVIDIA container toolkit required):
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  app:
+    restart: unless-stopped
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8317:8317"
+    volumes:
+      - ./server-data:/data     # holds config.toml + model cache
+      - ./seedkits:/app/seedkits:ro   # seed-kit manifests for `dc seed build`
+    environment:
+      DRONACHARYA_HOME: /data
+      HF_HOME: /data/hf-cache   # embedder/reranker cache survives image rebuilds
+
+  # Optional self-hosted metasearch for grounded `dc ask` internet fallback.
+  # Start with:  docker compose --profile searxng up -d
+  # Then set [websearch].searx_url = "http://searxng:8080" in the app config.
+  # (Called over HTTP only; SearxNG's AGPL license stays on the service.)
+  searxng:
+    profiles: ["searxng"]
+    restart: unless-stopped
+    image: searxng/searxng:latest
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./searxng:/etc/searxng
+
+  # Max-throughput serving for big models on DGX-class hardware.
+  # Start with:  VLLM_MODEL=Qwen/Qwen2.5-72B-Instruct-AWQ docker compose --profile vllm up -d
+  vllm:
+    restart: unless-stopped
+    profiles: ["vllm"]
+    image: vllm/vllm-openai:latest
+    command: ["--model", "${VLLM_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
+  ollama:
+  vllm-cache:

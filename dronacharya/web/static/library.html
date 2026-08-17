@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — Library</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="shell" data-page="library">
+<div class="content">
+  <div class="topbar">
+    <h2>Library</h2>
+    <span class="sub" id="lib-count"></span>
+    <div class="spacer"></div>
+    <button id="refresh" class="secondary">Refresh</button>
+    <button id="export" class="secondary">Export all</button>
+  </div>
+  <main>
+    <div class="card flat">
+      <div class="row">
+        <input id="filter" type="search" placeholder="Filter by title or summary…">
+      </div>
+      <div id="tags" style="margin-top:10px"></div>
+    </div>
+    <div id="list"></div>
+  </main>
+</div>
+<script src="/static/shell.js"></script>
+<script src="/static/library.js"></script>
+</body>
+</html>

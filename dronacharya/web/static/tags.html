@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — Tags</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="shell" data-page="tags">
+<div class="content">
+  <div class="topbar">
+    <h2>Tags</h2>
+    <span class="sub">semantic word map — related topics sit near each other,
+      darker means more knowledge</span>
+    <div class="spacer"></div>
+    <button id="tm-help" class="ghost icon" title="Navigation shortcuts">?</button>
+    <button id="tm-refresh" class="secondary">Refresh</button>
+  </div>
+  <main class="wide" style="padding:16px 26px 26px">
+    <div id="tagmap-wrap">
+      <div id="tagmap"></div>
+      <div class="nav-hints"><kbd>Ctrl</kbd>+wheel / <kbd>Ctrl</kbd>±
+        zoom · <kbd>Ctrl</kbd>0 reset · <kbd>Alt</kbd>+drag / <kbd>←↑↓→</kbd>
+        pan · <kbd>Shift</kbd>+wheel sideways</div>
+      <div id="tagmap-zoom">
+        <button class="ghost icon" id="tz-out" title="Zoom out">−</button>
+        <span class="z" id="tz-val">100%</span>
+        <button class="ghost icon" id="tz-in" title="Zoom in">＋</button>
+        <button class="ghost icon" id="tz-fit" title="Reset view">⤢</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/static/shell.js"></script>
+<script src="/static/tags.js"></script>
+</body>
+</html>

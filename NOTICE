@@ -1,0 +1,17 @@
+DronaCharya
+Copyright 2026 Manoj Kumar
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Vendored third-party front-end libraries (dronacharya/web/static/vendor/):
+- mind-elixir 5.15.1 — MIT License, Copyright (c) 2019 DjZhou
+  (LICENSE.mind-elixir)
+- Cytoscape.js 3.34.1 — MIT License, Copyright (c) 2016-2026 The Cytoscape
+  Consortium (LICENSE.cytoscape)
+
+The name "DronaCharya" and the DronaCharya logo are trade names of the
+project owner. The Apache License 2.0 does not grant permission to use
+them (see License section 6), except as required for reasonable and
+customary use in describing the origin of the work. Derived works and
+forks must use a different name that does not suggest endorsement by,
+or affiliation with, the DronaCharya project.

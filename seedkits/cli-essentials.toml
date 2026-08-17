@@ -1,0 +1,1128 @@
+# ============================================================================
+# Command-line essentials — seed knowledge base sources
+# Curated 2026-08-16. One page per URL; `dc seed build` fetches exactly these
+# (no crawling). Build docs: docs/seed-kits.md
+#
+# VERIFIED BY FETCHING at curation time (HTTP 200 + real server-rendered
+# content): ubuntu.com package-management, debian.org ch02, Fedora dnf
+# quick-docs, Rocky dnf guide, Alpine wiki apk, Tiny Core wiki/site pages,
+# Arch Wiki Pacman, doc.opensuse.org zypper, GNU coreutils/bash/grep/tar/make
+# manual pages, systemd systemctl, man.openbsd.org ssh, rsync man page,
+# man7.org find, Ubuntu CronHowto, git-scm gittutorial + Pro Git chapter,
+# python venv tutorial, pip getting-started, uv projects guide, pipx,
+# docker run reference, and the Microsoft Learn WSL/cmd/PowerShell/winget/
+# Terminal pages. Unverified URLs follow patterns confirmed by a verified
+# sibling on the same site (GNU html_node pages, Arch Wiki /title/ pages,
+# Microsoft Learn windows-commands/<cmd>, git-scm.com/docs/<cmd>, man7.org,
+# systemd man pages).
+#
+# GAPS / CAVEATS:
+# - en.opensuse.org (SDB:Zypper_usage) returns 403 to curl (bot challenge);
+#   replaced with doc.opensuse.org (GFDL 1.2, curl-friendly, verified).
+# - wiki.archlinux.org and docs.fedoraproject.org sit behind Anubis, which
+#   blocks browser-like bot user agents but passes plain curl (verified 200).
+# - Tiny Core Linux site/wiki state no explicit content license ->
+#   redistributable = false (user-build-only).
+# - Pro Git book chapters are CC BY-NC-SA 3.0 (NC clause) ->
+#   redistributable = false (user-build-only). git-scm.com/docs man pages are
+#   GPLv2 and are the redistributable alternative.
+# - GFDL / CC BY-SA / GPL sources allow derivatives but are copyleft:
+#   redistribution of distilled units must carry attribution + same license.
+# - man7.org: only pages with known-free upstream licenses are included
+#   (findutils GPL-3, util-linux GPL-2, iproute2 GPL-2, cronie ISC,
+#   shadow-utils BSD-3). Other man7 pages may use the Linux-man-pages
+#   "verbatim" license (no derivatives) — do not add more without checking.
+# ============================================================================
+
+# ---------------------------------------------------------------- Linux distros
+
+[[source]]
+topic = "linux/ubuntu"
+title = "Ubuntu Server: install and manage packages (apt)"
+url = "https://ubuntu.com/server/docs/how-to/software/package-management/"
+license = "CC BY-SA 3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/ubuntu"
+title = "Ubuntu Community Help: using the terminal"
+url = "https://help.ubuntu.com/community/UsingTheTerminal"
+license = "CC BY-SA 3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/debian"
+title = "Debian Reference ch.1: GNU/Linux tutorials (shell basics)"
+url = "https://www.debian.org/doc/manuals/debian-reference/ch01.en.html"
+license = "GPL-2.0-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/debian"
+title = "Debian Reference ch.2: Debian package management (apt)"
+url = "https://www.debian.org/doc/manuals/debian-reference/ch02.en.html"
+license = "GPL-2.0-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/debian"
+title = "Debian Reference ch.5: network setup"
+url = "https://www.debian.org/doc/manuals/debian-reference/ch05.en.html"
+license = "GPL-2.0-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/rhel"
+title = "Fedora Quick Docs: using the DNF package manager"
+url = "https://docs.fedoraproject.org/en-US/quick-docs/dnf/"
+license = "CC BY-SA 3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/rhel"
+title = "Rocky Linux: DNF package manager guide"
+url = "https://docs.rockylinux.org/guides/package_management/dnf_package_manager/"
+license = "CC BY-SA 4.0"
+redistributable = true
+
+[[source]]
+topic = "linux/rhel"
+title = "DNF command reference (upstream)"
+url = "https://dnf.readthedocs.io/en/latest/command_ref.html"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "linux/alpine"
+title = "Alpine Package Keeper (apk) usage"
+url = "https://wiki.alpinelinux.org/wiki/Alpine_Package_Keeper"
+license = "CC BY-SA 3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/tinycore"
+title = "Tiny Core Linux: core concepts (modes, persistence)"
+url = "http://tinycorelinux.net/concepts.html"
+license = "unclear (no stated license)"
+redistributable = false
+
+[[source]]
+topic = "linux/tinycore"
+title = "Tiny Core Linux FAQ (tce-load, extensions, backup)"
+url = "http://tinycorelinux.net/faq.html"
+license = "unclear (no stated license)"
+redistributable = false
+
+# (Tiny Core wiki pages removed 2026-08-16 — the doku.php wiki namespace now
+#  answers "this topic does not exist"; concepts.html + faq.html above cover
+#  tce-load/extension basics.)
+
+[[source]]
+topic = "linux/arch"
+title = "pacman package manager"
+url = "https://wiki.archlinux.org/title/Pacman"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/arch"
+title = "pacman Rosetta: package-manager command equivalences across distros"
+url = "https://wiki.archlinux.org/title/Pacman/Rosetta"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/opensuse"
+title = "openSUSE Leap: managing software with zypper (command line)"
+url = "https://doc.opensuse.org/documentation/leap/reference/html/book-reference/cha-sw-cl.html"
+license = "GFDL 1.2"
+redistributable = true
+
+# ---------------------------------------------------------------- bash & shell
+
+[[source]]
+topic = "linux/bash"
+title = "Bash manual: redirections"
+url = "https://www.gnu.org/software/bash/manual/html_node/Redirections.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/bash"
+title = "Bash manual: shell parameter expansion"
+url = "https://www.gnu.org/software/bash/manual/html_node/Shell-Parameter-Expansion.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/bash"
+title = "Bash manual: pipelines"
+url = "https://www.gnu.org/software/bash/manual/html_node/Pipelines.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/bash"
+title = "Bash manual: startup files (.bashrc, .profile)"
+url = "https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/bash"
+title = "Bash manual: job control basics"
+url = "https://www.gnu.org/software/bash/manual/html_node/Job-Control-Basics.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/bash"
+title = "Arch Wiki: Bash (interactive use, configuration)"
+url = "https://wiki.archlinux.org/title/Bash"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- coreutils & file tools
+
+[[source]]
+topic = "linux/coreutils"
+title = "ls invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/ls-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "cp invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/cp-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "mv invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/mv-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "rm invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/rm-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "mkdir invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/mkdir-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "chmod invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/chmod-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "chown invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/chown-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "df invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "du invocation"
+url = "https://www.gnu.org/software/coreutils/manual/html_node/du-invocation.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "find(1) man page"
+url = "https://man7.org/linux/man-pages/man1/find.1.html"
+license = "GPL-3.0 (findutils)"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "GNU Grep manual"
+url = "https://www.gnu.org/software/grep/manual/grep.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/coreutils"
+title = "GNU tar tutorial (create/list/extract)"
+url = "https://www.gnu.org/software/tar/manual/html_node/Tutorial.html"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- systemd & logs
+
+[[source]]
+topic = "linux/systemd"
+title = "systemctl man page"
+url = "https://www.freedesktop.org/software/systemd/man/latest/systemctl.html"
+license = "LGPL-2.1-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/systemd"
+title = "journalctl man page"
+url = "https://www.freedesktop.org/software/systemd/man/latest/journalctl.html"
+license = "LGPL-2.1-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/systemd"
+title = "systemd.unit man page (unit files)"
+url = "https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html"
+license = "LGPL-2.1-or-later"
+redistributable = true
+
+[[source]]
+topic = "linux/systemd"
+title = "Arch Wiki: systemd (managing services)"
+url = "https://wiki.archlinux.org/title/Systemd"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/systemd"
+title = "Arch Wiki: systemd journal"
+url = "https://wiki.archlinux.org/title/Systemd/Journal"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- ssh / rsync
+
+[[source]]
+topic = "linux/ssh"
+title = "ssh(1) man page"
+url = "https://man.openbsd.org/ssh"
+license = "BSD (OpenSSH)"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "scp(1) man page"
+url = "https://man.openbsd.org/scp"
+license = "BSD (OpenSSH)"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "ssh-keygen(1) man page"
+url = "https://man.openbsd.org/ssh-keygen"
+license = "BSD (OpenSSH)"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "ssh_config(5) man page"
+url = "https://man.openbsd.org/ssh_config"
+license = "BSD (OpenSSH)"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "Arch Wiki: SSH keys"
+url = "https://wiki.archlinux.org/title/SSH_keys"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "Arch Wiki: OpenSSH (client and server setup)"
+url = "https://wiki.archlinux.org/title/OpenSSH"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "rsync(1) man page"
+url = "https://download.samba.org/pub/rsync/rsync.html"
+license = "GPL-3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/ssh"
+title = "Arch Wiki: rsync (common usage)"
+url = "https://wiki.archlinux.org/title/Rsync"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- cron
+
+[[source]]
+topic = "linux/cron"
+title = "Arch Wiki: cron"
+url = "https://wiki.archlinux.org/title/Cron"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/cron"
+title = "Ubuntu Community Help: CronHowto"
+url = "https://help.ubuntu.com/community/CronHowto"
+license = "CC BY-SA 3.0"
+redistributable = true
+
+[[source]]
+topic = "linux/cron"
+title = "crontab(5) man page (crontab file format)"
+url = "https://man7.org/linux/man-pages/man5/crontab.5.html"
+license = "ISC (cronie)"
+redistributable = true
+
+# ---------------------------------------------------------------- mount / storage
+
+[[source]]
+topic = "linux/storage"
+title = "mount(8) man page"
+url = "https://man7.org/linux/man-pages/man8/mount.8.html"
+license = "GPL-2.0 (util-linux)"
+redistributable = true
+
+[[source]]
+topic = "linux/storage"
+title = "fstab(5) man page"
+url = "https://man7.org/linux/man-pages/man5/fstab.5.html"
+license = "GPL-2.0 (util-linux)"
+redistributable = true
+
+[[source]]
+topic = "linux/storage"
+title = "Arch Wiki: fstab"
+url = "https://wiki.archlinux.org/title/Fstab"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- users & permissions
+
+[[source]]
+topic = "linux/users"
+title = "Arch Wiki: users and groups"
+url = "https://wiki.archlinux.org/title/Users_and_groups"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/users"
+title = "useradd(8) man page"
+url = "https://man7.org/linux/man-pages/man8/useradd.8.html"
+license = "BSD-3-Clause (shadow-utils)"
+redistributable = true
+
+[[source]]
+topic = "linux/users"
+title = "usermod(8) man page"
+url = "https://man7.org/linux/man-pages/man8/usermod.8.html"
+license = "BSD-3-Clause (shadow-utils)"
+redistributable = true
+
+[[source]]
+topic = "linux/users"
+title = "passwd(1) man page"
+url = "https://man7.org/linux/man-pages/man1/passwd.1.html"
+license = "BSD-3-Clause (shadow-utils)"
+redistributable = true
+
+# ---------------------------------------------------------------- networking basics
+
+[[source]]
+topic = "linux/networking"
+title = "ip(8) man page (iproute2)"
+url = "https://man7.org/linux/man-pages/man8/ip.8.html"
+license = "GPL-2.0 (iproute2)"
+redistributable = true
+
+[[source]]
+topic = "linux/networking"
+title = "ip-address(8) man page"
+url = "https://man7.org/linux/man-pages/man8/ip-address.8.html"
+license = "GPL-2.0 (iproute2)"
+redistributable = true
+
+[[source]]
+topic = "linux/networking"
+title = "Arch Wiki: network configuration"
+url = "https://wiki.archlinux.org/title/Network_configuration"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "linux/networking"
+title = "curl man page"
+url = "https://curl.se/docs/manpage.html"
+license = "curl license (MIT-like)"
+redistributable = true
+
+[[source]]
+topic = "linux/networking"
+title = "GNU Wget manual"
+url = "https://www.gnu.org/software/wget/manual/wget.html"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- git
+
+[[source]]
+topic = "tools/git"
+title = "gittutorial: a tutorial introduction to Git"
+url = "https://git-scm.com/docs/gittutorial"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "giteveryday: useful minimum set of daily Git commands"
+url = "https://git-scm.com/docs/giteveryday"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git clone reference"
+url = "https://git-scm.com/docs/git-clone"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git add reference"
+url = "https://git-scm.com/docs/git-add"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git commit reference"
+url = "https://git-scm.com/docs/git-commit"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git branch reference"
+url = "https://git-scm.com/docs/git-branch"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git merge reference"
+url = "https://git-scm.com/docs/git-merge"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git rebase reference"
+url = "https://git-scm.com/docs/git-rebase"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git log reference"
+url = "https://git-scm.com/docs/git-log"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git remote reference"
+url = "https://git-scm.com/docs/git-remote"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git push reference"
+url = "https://git-scm.com/docs/git-push"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "git stash reference"
+url = "https://git-scm.com/docs/git-stash"
+license = "GPL-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/git"
+title = "Pro Git: What is Git?"
+url = "https://git-scm.com/book/en/v2/Getting-Started-What-is-Git%3F"
+license = "CC BY-NC-SA 3.0"
+redistributable = false
+
+[[source]]
+topic = "tools/git"
+title = "Pro Git: getting a Git repository"
+url = "https://git-scm.com/book/en/v2/Git-Basics-Getting-a-Git-Repository"
+license = "CC BY-NC-SA 3.0"
+redistributable = false
+
+[[source]]
+topic = "tools/git"
+title = "Pro Git: basic branching and merging"
+url = "https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging"
+license = "CC BY-NC-SA 3.0"
+redistributable = false
+
+# ---------------------------------------------------------------- python & packaging
+
+[[source]]
+topic = "tools/python"
+title = "Python tutorial: using the Python interpreter"
+url = "https://docs.python.org/3/tutorial/interpreter.html"
+license = "PSF-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/python"
+title = "Python tutorial: virtual environments and packages"
+url = "https://docs.python.org/3/tutorial/venv.html"
+license = "PSF-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/python"
+title = "venv module reference"
+url = "https://docs.python.org/3/library/venv.html"
+license = "PSF-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/python"
+title = "Python command line and environment (python CLI flags)"
+url = "https://docs.python.org/3/using/cmdline.html"
+license = "PSF-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/python"
+title = "Installing Python modules (pip overview)"
+url = "https://docs.python.org/3/installing/index.html"
+license = "PSF-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/pip"
+title = "pip: getting started"
+url = "https://pip.pypa.io/en/stable/getting-started/"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/pip"
+title = "pip install command reference"
+url = "https://pip.pypa.io/en/stable/cli/pip_install/"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/pip"
+title = "pip requirements file format"
+url = "https://pip.pypa.io/en/stable/reference/requirements-file-format/"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/uv"
+title = "uv: installation"
+url = "https://docs.astral.sh/uv/getting-started/installation/"
+license = "MIT/Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/uv"
+title = "uv: working on projects"
+url = "https://docs.astral.sh/uv/guides/projects/"
+license = "MIT/Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/uv"
+title = "uv: using tools (uvx, uv tool install)"
+url = "https://docs.astral.sh/uv/guides/tools/"
+license = "MIT/Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/uv"
+title = "uv: running scripts"
+url = "https://docs.astral.sh/uv/guides/scripts/"
+license = "MIT/Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/pipx"
+title = "pipx: install and run Python applications in isolated environments"
+url = "https://pipx.pypa.io/stable/"
+license = "MIT"
+redistributable = true
+
+# ---------------------------------------------------------------- docker
+
+[[source]]
+topic = "tools/docker"
+title = "docker container run CLI reference"
+url = "https://docs.docker.com/reference/cli/docker/container/run/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "Running containers (docker run guide)"
+url = "https://docs.docker.com/engine/containers/run/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker container exec CLI reference"
+url = "https://docs.docker.com/reference/cli/docker/container/exec/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker compose CLI reference"
+url = "https://docs.docker.com/reference/cli/docker/compose/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker ps / container ls reference"
+url = "https://docs.docker.com/reference/cli/docker/container/ls/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker images / image ls reference"
+url = "https://docs.docker.com/reference/cli/docker/image/ls/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker pull reference"
+url = "https://docs.docker.com/reference/cli/docker/image/pull/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker build (buildx) reference"
+url = "https://docs.docker.com/reference/cli/docker/buildx/build/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker logs reference"
+url = "https://docs.docker.com/reference/cli/docker/container/logs/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker stop reference"
+url = "https://docs.docker.com/reference/cli/docker/container/stop/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker rm reference"
+url = "https://docs.docker.com/reference/cli/docker/container/rm/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker cp reference (copy files container <-> host)"
+url = "https://docs.docker.com/reference/cli/docker/container/cp/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker volume commands"
+url = "https://docs.docker.com/reference/cli/docker/volume/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker network commands"
+url = "https://docs.docker.com/reference/cli/docker/network/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker system prune reference (reclaim disk)"
+url = "https://docs.docker.com/reference/cli/docker/system/prune/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker compose up reference"
+url = "https://docs.docker.com/reference/cli/docker/compose/up/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "docker compose logs reference"
+url = "https://docs.docker.com/reference/cli/docker/compose/logs/"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/docker"
+title = "Compose file reference: services (image, ports, volumes, deploy)"
+url = "https://docs.docker.com/reference/compose-file/services/"
+license = "Apache-2.0"
+redistributable = true
+
+# ---------------------------------------------------------------- make
+
+[[source]]
+topic = "tools/make"
+title = "GNU make: a simple makefile"
+url = "https://www.gnu.org/software/make/manual/html_node/Simple-Makefile.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "tools/make"
+title = "GNU make: writing rules"
+url = "https://www.gnu.org/software/make/manual/html_node/Rules.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "tools/make"
+title = "GNU make: variables make makefiles simpler"
+url = "https://www.gnu.org/software/make/manual/html_node/Variables-Simplify.html"
+license = "GFDL 1.3"
+redistributable = true
+
+[[source]]
+topic = "tools/make"
+title = "GNU make: phony targets"
+url = "https://www.gnu.org/software/make/manual/html_node/Phony-Targets.html"
+license = "GFDL 1.3"
+redistributable = true
+
+# ---------------------------------------------------------------- local LLM serving
+# (verified 2026-08-16 through the real fetch+extract pipeline;
+#  docs.vllm.ai/en/latest/serving/openai_compatible_server and
+#  docs.ollama.com/quickstart|/api render JS-thin — do not add them)
+
+[[source]]
+topic = "tools/ollama"
+title = "Ollama CLI reference (run, pull, list, ps, rm, serve)"
+url = "https://docs.ollama.com/cli"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/ollama"
+title = "Ollama FAQ (keep_alive, model location, env vars, proxies)"
+url = "https://docs.ollama.com/faq"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/ollama"
+title = "Ollama on Linux (install, systemd service, GPU)"
+url = "https://docs.ollama.com/linux"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/ollama"
+title = "Ollama in Docker"
+url = "https://docs.ollama.com/docker"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/ollama"
+title = "Ollama README (quick start, model library, examples)"
+url = "https://github.com/ollama/ollama/blob/main/README.md"
+license = "MIT"
+redistributable = true
+
+[[source]]
+topic = "tools/vllm"
+title = "vLLM quickstart (offline inference + OpenAI-compatible server)"
+url = "https://docs.vllm.ai/en/latest/getting_started/quickstart.html"
+license = "Apache-2.0"
+redistributable = true
+
+[[source]]
+topic = "tools/vllm"
+title = "vllm serve CLI reference (flags: max-model-len, gpu-memory-utilization, …)"
+url = "https://docs.vllm.ai/en/latest/cli/serve.html"
+license = "Apache-2.0"
+redistributable = true
+
+# ---------------------------------------------------------------- WSL
+
+[[source]]
+topic = "wsl"
+title = "Install WSL"
+url = "https://learn.microsoft.com/en-us/windows/wsl/install"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Set up a WSL development environment (best practices)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/setup/environment"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Basic commands for WSL (wsl.exe CLI reference)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/basic-commands"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Working across Windows and Linux file systems (/mnt/c, drvfs mounts)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/filesystems"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Mount a disk in WSL 2 (wsl --mount)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/wsl2-mount-disk"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Accessing network applications with WSL (networking modes, localhost)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/networking"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Comparing WSL 1 and WSL 2"
+url = "https://learn.microsoft.com/en-us/windows/wsl/compare-versions"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Advanced settings configuration (wsl.conf and .wslconfig)"
+url = "https://learn.microsoft.com/en-us/windows/wsl/wsl-config"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "Troubleshooting WSL"
+url = "https://learn.microsoft.com/en-us/windows/wsl/troubleshooting"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "wsl"
+title = "WSL frequently asked questions"
+url = "https://learn.microsoft.com/en-us/windows/wsl/faq"
+license = "CC BY 4.0"
+redistributable = true
+
+# ---------------------------------------------------------------- Windows cmd
+
+[[source]]
+topic = "windows/cmd"
+title = "dir command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/dir"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "copy command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/copy"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "xcopy command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/xcopy"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "robocopy command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "del command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/del"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "set command (environment variables in cmd)"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "findstr command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "tasklist command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tasklist"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "taskkill command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "ipconfig command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "netsh command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netsh"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/cmd"
+title = "ping command"
+url = "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ping"
+license = "CC BY 4.0"
+redistributable = true
+
+# ---------------------------------------------------------------- PowerShell
+
+[[source]]
+topic = "windows/powershell"
+title = "What is PowerShell?"
+url = "https://learn.microsoft.com/en-us/powershell/scripting/overview"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/powershell"
+title = "PowerShell 101: getting started"
+url = "https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/01-getting-started"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/powershell"
+title = "PowerShell 101: one-liners and the pipeline"
+url = "https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/04-pipelines"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/powershell"
+title = "Get-Help cmdlet reference"
+url = "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-help"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/powershell"
+title = "Get-ChildItem cmdlet reference"
+url = "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-childitem"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/powershell"
+title = "about_Execution_Policies"
+url = "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies"
+license = "CC BY 4.0"
+redistributable = true
+
+# ---------------------------------------------------------------- winget & Terminal
+
+[[source]]
+topic = "windows/winget"
+title = "Use WinGet to install and manage applications"
+url = "https://learn.microsoft.com/en-us/windows/package-manager/winget/"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/winget"
+title = "winget install command"
+url = "https://learn.microsoft.com/en-us/windows/package-manager/winget/install"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/winget"
+title = "winget search command"
+url = "https://learn.microsoft.com/en-us/windows/package-manager/winget/search"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/terminal"
+title = "Windows Terminal installation"
+url = "https://learn.microsoft.com/en-us/windows/terminal/install"
+license = "CC BY 4.0"
+redistributable = true
+
+[[source]]
+topic = "windows/terminal"
+title = "Windows Terminal tips and tricks"
+url = "https://learn.microsoft.com/en-us/windows/terminal/tips-and-tricks"
+license = "CC BY 4.0"
+redistributable = true

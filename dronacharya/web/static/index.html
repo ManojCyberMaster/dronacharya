@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — Ask</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="shell" data-page="ask">
+<div class="content">
+  <main>
+    <div class="hero">
+      <h1>Ask <span class="grad">your</span> knowledge</h1>
+      <p>Answers come only from what you saved — always with sources.</p>
+    </div>
+    <div class="askbox">
+      <button class="filterbtn" id="filterbtn" title="Filter by tags">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+        <span class="count" id="filtercount" style="display:none">0</span>
+      </button>
+      <input id="question" type="text" placeholder="Ask your knowledge base…" autofocus>
+      <div class="actions">
+        <button id="ask">Ask</button>
+        <button id="deeper" class="secondary" title="Answer beyond your knowledge base">Deeper</button>
+      </div>
+      <div class="filter-pop" id="filterpop">
+        <div class="muted" style="margin-bottom:8px">Answers use only knowledge
+          carrying these tags. <code>Research</code> also matches
+          <code>Research/RAG</code>.</div>
+        <div id="tagchips" style="margin-bottom:6px"></div>
+        <div style="position:relative">
+          <input id="tagfilter" type="text"
+                 placeholder="add a tag — Enter to apply">
+        </div>
+      </div>
+    </div>
+    <div class="faint" style="margin-top:8px">
+      “Deeper” goes beyond your knowledge base, clearly labeled.
+    </div>
+    <div id="thread" style="margin-top:18px"></div>
+  </main>
+</div>
+<script src="/static/shell.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

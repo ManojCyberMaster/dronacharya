@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+
+# server deployment state (holds real tokens) — never commit
+server-data/
+# built seed kits (publish as release assets, not in-tree)
+*.dckit.json
+searxng/*
+!searxng/settings.yml

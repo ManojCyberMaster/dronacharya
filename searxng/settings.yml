@@ -1,0 +1,13 @@
+# SearxNG settings for the DronaCharya `dc ask` fallback.
+# json format MUST be enabled — the app queries /search?format=json.
+use_default_settings: true
+
+server:
+  # CHANGE THIS to any long random string before first start:
+  secret_key: "CHANGE-ME-to-a-long-random-string"
+  limiter: false          # LAN-only service; enable if you expose it
+
+search:
+  formats:
+    - html
+    - json

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — Graph</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="shell" data-page="graph">
+<div class="content">
+  <div class="topbar">
+    <h2>Knowledge graph</h2>
+    <span class="sub">search results as connected facts, sources and tags</span>
+  </div>
+  <main class="wide" style="padding:16px 26px 26px">
+    <div class="row" style="margin-bottom:12px">
+      <input id="gq" type="search"
+             placeholder="e.g. docker on proxmox with the DGX…" autofocus>
+      <button id="go">Map it</button>
+    </div>
+    <div id="graph-wrap">
+      <div id="cy"></div>
+      <div id="graph-info"></div>
+      <div id="graph-legend">
+        <span><span class="sw" style="background:#34d399"></span>fact</span>
+        <span><span class="sw" style="background:#5b9cf5"></span>source</span>
+        <span><span class="sw" style="background:#e3a93c"></span>tag</span>
+        <span style="opacity:.8">┄ semantic relation (thicker = closer)</span>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/graph.js"></script>
+</body>
+</html>

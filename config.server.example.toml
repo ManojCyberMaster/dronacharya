@@ -1,0 +1,52 @@
+# DronaCharya HOME SERVER config (docker compose).
+# Copy to ./server-data/config.toml and edit the token before `docker compose up`.
+
+[deployment]
+role = "server"
+
+[server]
+host = "0.0.0.0"            # bind LAN inside the container (compose maps 8317)
+port = 8317
+token = "CHANGE-ME-to-a-long-random-string"
+
+[storage]
+backend = "postgres"
+postgres_dsn = "postgres://dronacharya:dronacharya@postgres:5432/dronacharya"
+
+[notes]
+directories = []            # notes usually sync FROM laptops via `dc sync`
+
+[embeddings]
+preset = "english"          # must match every synced device (fixed per KB)
+
+[retrieval]
+top_k = 8
+rerank = "on"               # the server tier always reranks
+rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+min_confidence = 0.015
+dup_threshold = 0.90
+
+[llm]
+# Server order: local big models first, cloud as fallback.
+provider_order = ["vllm", "ollama", "anthropic", "openai"]
+anthropic_model = "claude-opus-5"
+openai_model = "gpt-4o"
+ollama_url = "http://ollama:11434/v1"
+ollama_model = "llama3.3:70b"          # pull it first: docker compose exec ollama ollama pull llama3.3:70b
+vllm_url = "http://vllm:8000/v1"       # only with: docker compose --profile vllm up
+vllm_model = "Qwen/Qwen2.5-32B-Instruct-AWQ"   # DGX Spark: "openai/gpt-oss-120b" (see docker-compose.dgx-spark.yml)
+
+[websearch]
+searx_url = ""              # "http://searxng:8080" after: docker compose --profile searxng up -d
+
+[extraction]
+primary = "server-fetch"
+firecrawl_api_key = ""
+
+[guardrails]
+pii_mode = "redact"
+policy = "basic"
+
+[sync]
+auto = true
+interval_seconds = 600

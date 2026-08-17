@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — Mind maps</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/vendor/MindElixir.css">
+</head>
+<body class="shell" data-page="mindmap">
+<div class="content">
+  <div class="topbar">
+    <h2>Mind maps</h2>
+    <div class="mm-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input id="mm-search-maps" type="search" autocomplete="off"
+             placeholder="Search with mind map name or central topics">
+    </div>
+    <div class="spacer"></div>
+  </div>
+  <main class="wide" style="padding:12px 26px 22px">
+    <div class="mm-toolbar">
+      <button id="mm-new" class="primary" title="New mind map">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <div class="mm-menu" id="mm-file-menu">
+        <button title="File — rename, duplicate, import, export, map tags">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
+        <div class="dd">
+          <button data-act="rename">Rename map</button>
+          <button data-act="duplicate">Duplicate map</button>
+          <button data-act="maptags">Map tags…</button>
+          <button data-act="import">Import JSON…</button>
+          <button data-act="export-png">Export PNG</button>
+          <button data-act="export-svg">Export SVG</button>
+          <button data-act="export-md">Export Markdown</button>
+          <button data-act="export-json">Export JSON</button>
+        </div>
+      </div>
+      <span class="sep"></span>
+      <button id="mm-undo" title="Undo (Ctrl+Z)">↶</button>
+      <button id="mm-redo" title="Redo (Ctrl+Y)">↷</button>
+      <span class="sep"></span>
+      <button id="mm-add-child" title="Add child — a level deeper (Tab)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h8"/><path d="M8 5v11a2 2 0 0 0 2 2h3"/><path d="M17 15v6M14 18h6"/></svg></button>
+      <button id="mm-add-sib" title="Add sibling — same level below (Enter)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h13"/><path d="M4 13h7"/><path d="M17 13v6M14 16h6"/></svg></button>
+      <button id="mm-add-free" title="Add standalone node — no connecting line">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8" width="9.5" height="8" rx="2"/><path d="M18 9v6M15 12h6"/></svg></button>
+      <button id="mm-del-node" title="Delete node (Del)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+      <button id="mm-note-btn" title="Add / open the note of the selected node">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10l7-7V4a1 1 0 0 0-1-1z"/><path d="M14 21v-6a1 1 0 0 1 1-1h6"/></svg></button>
+      <span class="sep"></span>
+      <button id="mm-focus" title="Focus: temporarily make the selected branch the whole map">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg></button>
+      <button id="mm-unfocus" title="Back to the whole map">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <span class="sep"></span>
+      <button id="mm-zoom-out" title="Zoom out (wheel also zooms)">−</button>
+      <span class="zoom" id="mm-zoom">100%</span>
+      <button id="mm-zoom-in" title="Zoom in (wheel also zooms)">＋</button>
+      <button id="mm-fit" title="Reset zoom &amp; center">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+      <span class="sep"></span>
+      <button id="mm-help" title="Keyboard shortcuts &amp; tips">?</button>
+    </div>
+    <div class="mm-shell">
+      <div id="mm-stage">
+        <div id="mm"></div>
+        <div id="mm-status">no map</div>
+        <div class="nav-hints"><kbd>Ctrl</kbd>+wheel / <kbd>Ctrl</kbd>±
+          zoom · <kbd>Ctrl</kbd>0 reset · <kbd>Alt</kbd>+drag pan ·
+          <kbd>Shift</kbd>+wheel sideways · <kbd>?</kbd> all shortcuts</div>
+
+        <div class="mm-pop" id="pop-maps">
+          <h4>Your maps</h4>
+          <button id="mm-new2" style="width:100%; margin-bottom:8px">＋ New map</button>
+          <div id="mm-list"></div>
+        </div>
+
+        <div class="mm-pop" id="pop-layout">
+          <h4>Layout</h4>
+          <div class="layoutbtns">
+            <button data-dir="0" title="All branches to the left">
+              <svg viewBox="0 0 44 30" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="36" cy="15" r="3.4"/><path d="M32 15h-8M24 15l-6-8h-8M24 15h-16M24 15l-6 8h-8"/></svg>
+              Left</button>
+            <button data-dir="1" title="All branches to the right">
+              <svg viewBox="0 0 44 30" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="3.4"/><path d="M12 15h8M20 15l6-8h8M20 15h16M20 15l6 8h8"/></svg>
+              Right</button>
+            <button data-dir="2" title="Branches on both sides">
+              <svg viewBox="0 0 44 30" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="22" cy="15" r="3.4"/><path d="M26 15h6l4-7M32 15h8M18 15h-6l-4-7M12 15h-8M32 15l4 7M12 15l-4 7"/></svg>
+              Balanced</button>
+            <button data-dir="3" title="Top-down tree">
+              <svg viewBox="0 0 44 30" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="22" cy="6" r="3.4"/><path d="M22 10v5M22 15h-12v7M22 15v7M22 15h12v7"/></svg>
+              Hierarchical</button>
+          </div>
+        </div>
+
+        <div class="mm-pop" id="pop-theme">
+          <h4>Theme</h4>
+          <div class="themecards" id="mm-themes"></div>
+        </div>
+
+        <div class="mm-pop" id="pop-style">
+          <h4>Node style</h4>
+          <div class="hint" id="mm-style-hint" style="margin-bottom:10px">Select a node first.</div>
+          <div id="mm-style-body">
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Text color</div>
+              <div class="swatches" id="mm-color"></div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Background</div>
+              <div class="swatches" id="mm-bg"></div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Text style</div>
+              <div class="sizebtns">
+                <button class="secondary" id="mm-bold" title="Bold"><b>B</b></button>
+                <button class="secondary" id="mm-italic" title="Italic"><i>I</i></button>
+                <button class="secondary" id="mm-underline" title="Underline"><u>U</u></button>
+              </div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Box — click again for the theme default</div>
+              <div class="optbtns" id="mm-box">
+                <button class="secondary" data-box="rect" title="Rectangle">
+                  <svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="22" height="12" rx="1"/></svg></button>
+                <button class="secondary" data-box="round" title="Rounded rectangle">
+                  <svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="22" height="12" rx="6"/></svg></button>
+                <button class="secondary" data-box="ellipse" title="Ellipse">
+                  <svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="13" cy="9" rx="11" ry="6.5"/></svg></button>
+                <button class="secondary" data-box="none" title="No box — plain text">
+                  <svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3,3"><rect x="2" y="3" width="22" height="12" rx="1"/></svg></button>
+              </div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Icons</div>
+              <div class="emoji-row" id="mm-icons"></div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Tags — shared with the whole app</div>
+              <div class="mm-chiprow" id="mm-tag-chips"></div>
+              <div style="position:relative">
+                <input id="mm-node-tags" type="text" placeholder="add a tag…"></div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Hyperlink</div>
+              <input id="mm-node-link" type="text" placeholder="https://…">
+            </div>
+          </div>
+        </div>
+
+        <div class="mm-pop" id="pop-note">
+          <h4 style="display:flex; align-items:center">
+            <span>Note — <span id="mm-note-topic" style="text-transform:none"></span></span>
+            <button class="ghost icon" id="mm-note-wide" title="Expand / restore panel"
+                    style="margin-left:auto; padding:2px 7px">⤢</button></h4>
+          <div class="hint" id="mm-note-hint" style="margin-bottom:10px">Select a node first.</div>
+          <div id="mm-note-body" style="display:none">
+            <div class="wtb">
+              <button data-cmd="bold" title="Bold"><b>B</b></button>
+              <button data-cmd="italic" title="Italic"><i>I</i></button>
+              <button data-cmd="underline" title="Underline"><u>U</u></button>
+              <button data-cmd="strikeThrough" title="Strike"><s>S</s></button>
+              <button data-cmd="insertUnorderedList" title="Bullet list">•≡</button>
+              <button data-cmd="insertOrderedList" title="Numbered list">1≡</button>
+              <button data-cmd="removeFormat" title="Clear formatting">⌫ᵃ</button>
+            </div>
+            <div id="mm-note-editor" contenteditable="true"></div>
+            <button class="danger" id="mm-note-del"
+                    style="width:100%; margin-top:10px">Delete note</button>
+          </div>
+        </div>
+
+        <div class="mm-pop" id="pop-link">
+          <h4>Link style</h4>
+          <div class="hint" id="mm-link-hint" style="margin-bottom:10px">
+            <b>Click any line</b> — a tree branch or a custom link — to select
+            and style it. Draw custom links between unrelated nodes with
+            right-click → <b>Link</b>, then click the target.</div>
+          <div id="mm-branch-body" style="display:none">
+            <div class="hint" style="margin-bottom:10px">The tree line into
+              “<span id="mm-branch-topic"></span>”.</div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Label</div>
+              <input id="mm-branch-label" type="text" placeholder="label on the line">
+            </div>
+            <label class="row" style="gap:7px; margin-bottom:12px; cursor:pointer; font-size:13px">
+              <input type="checkbox" id="mm-branch-inherit" style="width:auto">
+              Inherit style from parent link</label>
+            <div id="mm-branch-style-groups">
+              <div class="group">
+                <div class="faint" style="margin-bottom:4px">Color — this link only</div>
+                <div class="swatches" id="mm-branch-color"></div>
+              </div>
+              <div class="group">
+                <div class="faint" style="margin-bottom:4px">Line style</div>
+                <div class="optbtns" id="mm-branch-dash">
+                  <button class="secondary" data-dash="0">Solid</button>
+                  <button class="secondary" data-dash="8,4">Dashed</button>
+                  <button class="secondary" data-dash="2,4">Dotted</button>
+                </div>
+              </div>
+              <div class="group">
+                <div class="faint" style="margin-bottom:4px">Weight</div>
+                <div class="optbtns" id="mm-branch-width">
+                  <button class="secondary" data-width="1">Thin</button>
+                  <button class="secondary" data-width="2">Normal</button>
+                  <button class="secondary" data-width="4">Bold</button>
+                </div>
+              </div>
+            </div>
+            <button class="danger" id="mm-branch-detach" style="width:100%">Remove link
+              (detach from parent)</button>
+          </div>
+          <div id="mm-link-body" style="display:none">
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Label</div>
+              <input id="mm-link-label" type="text" placeholder="label text">
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Color</div>
+              <div class="swatches" id="mm-link-color"></div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Line style</div>
+              <div class="optbtns" id="mm-link-dash">
+                <button class="secondary" data-dash="0">Solid</button>
+                <button class="secondary" data-dash="8,4">Dashed</button>
+                <button class="secondary" data-dash="2,4">Dotted</button>
+              </div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Weight</div>
+              <div class="optbtns" id="mm-link-width">
+                <button class="secondary" data-width="1">Thin</button>
+                <button class="secondary" data-width="2">Normal</button>
+                <button class="secondary" data-width="4">Bold</button>
+              </div>
+            </div>
+            <div class="group">
+              <div class="faint" style="margin-bottom:4px">Arrows</div>
+              <div class="optbtns" id="mm-link-dir">
+                <button class="secondary" data-bidir="0">One-way →</button>
+                <button class="secondary" data-bidir="1">Both ↔</button>
+              </div>
+            </div>
+            <button class="danger" id="mm-link-del" style="width:100%">Remove link</button>
+          </div>
+        </div>
+
+        <div class="mm-pop" id="pop-outline">
+          <h4>Outline</h4>
+          <input id="mm-search-nodes" type="search" placeholder="Find in map…"
+                 style="margin-bottom:8px">
+          <div id="mm-outline-list"></div>
+        </div>
+      </div>
+
+      <div class="mm-rail">
+        <button data-pop="maps" title="Your maps">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+        <button data-pop="outline" title="Outline &amp; find">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg></button>
+        <div class="sep"></div>
+        <button data-pop="layout" title="Layout">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/></svg></button>
+        <button data-pop="theme" title="Theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7S5.5 10 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10 12 2.7 12 2.7z"/></svg></button>
+        <button data-pop="style" title="Node style">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5zM2 2l7.6 7.6"/><circle cx="11" cy="11" r="2"/></svg></button>
+        <button data-pop="note" title="Node note">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10l7-7V4a1 1 0 0 0-1-1z"/><path d="M14 21v-6a1 1 0 0 1 1-1h6"/></svg></button>
+        <button data-pop="link" title="Link style">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/static/vendor/MindElixir.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/mindmap.js"></script>
+</body>
+</html>

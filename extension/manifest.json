@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "DronaCharya — Save to my knowledge base",
+  "version": "0.3.1",
+  "description": "Sends the page you explicitly save to your own DronaCharya server. No tracking, no third parties — your data goes only to the server URL you configure. Includes to-do reminders synced with your knowledge base.",
+  "permissions": ["activeTab", "scripting", "storage", "contextMenus", "alarms", "notifications"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "icons": { "128": "icon128.png" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "DronaCharya"
+  }
+}

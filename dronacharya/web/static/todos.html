@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DronaCharya — To-dos</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="shell" data-page="todos">
+<div class="content">
+  <div class="topbar">
+    <h2>To-dos</h2>
+    <span class="sub">reminders that live in your knowledge base — synced,
+      searchable, notified by the browser extension</span>
+    <div class="spacer"></div>
+    <label class="muted" style="display:flex; gap:6px; align-items:center; cursor:pointer">
+      <input type="checkbox" id="td-show-done" style="width:auto"> show done</label>
+  </div>
+  <main>
+    <div class="card">
+      <div class="row wrap">
+        <input id="td-text" type="text" placeholder="What needs doing? (Enter to add)"
+               style="flex:1; min-width:220px">
+        <input id="td-due" type="datetime-local" title="Optional reminder time"
+               style="width:210px">
+        <button id="td-add">Add</button>
+      </div>
+      <div class="faint" style="margin-top:6px">With a time set, the browser
+        extension fires a notification when it's due.</div>
+    </div>
+    <div id="td-list"></div>
+  </main>
+</div>
+<script src="/static/shell.js"></script>
+<script src="/static/todos.js"></script>
+</body>
+</html>
