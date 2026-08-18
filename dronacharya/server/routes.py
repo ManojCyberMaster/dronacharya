@@ -363,7 +363,18 @@ def upload_files(request: Request, files: list[UploadFile] = File(...),
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     uploads_dir = home_dir() / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        probe = uploads_dir / ".writable"
+        probe.touch()
+        probe.unlink()
+    except OSError as e:
+        # bind-mount ownership mismatch is the classic cause — say so
+        return JSONResponse(
+            {"detail": f"server cannot write {uploads_dir}: {e}. If running "
+                       "in docker, the app user must own the data volume "
+                       "(compose sets user: to the host uid — rebuild with "
+                       "docker compose up -d --build app)"}, status_code=507)
     results = []
     repo = open_repo(request)
     try:

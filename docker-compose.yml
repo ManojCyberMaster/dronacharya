@@ -42,6 +42,9 @@ services:
   app:
     restart: unless-stopped
     build: .
+    # run as the HOST user so the bind-mounted ./server-data stays writable
+    # (the image's non-root user can't write a volume owned by uid 1000)
+    user: "${DRONACHARYA_UID:-1000}:${DRONACHARYA_GID:-1000}"
     depends_on:
       postgres:
         condition: service_healthy
