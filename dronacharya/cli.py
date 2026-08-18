@@ -10,6 +10,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import config_path, db_path, load_config, write_default_config
+from .models import unit_index_text
 
 app = typer.Typer(help="DronaCharya — personal knowledge management with a local RAG.")
 seed_app = typer.Typer(help="Seed knowledge kits — portable starter knowledge.")
@@ -47,7 +48,11 @@ def _auto_sync(config, repo) -> None:
     """[sync] auto: reconcile with the home server after KB-touching work."""
     from .sync.client import maybe_auto_sync
 
-    report = maybe_auto_sync(repo, config)
+    report = maybe_auto_sync(
+        repo, config,
+        on_start=lambda: console.print(
+            "[dim]auto-sync with your server (pulled changes re-embed "
+            "locally — can take a while after big imports)…[/dim]"))
     if report and (report.pushed or report.pulled or report.deleted):
         console.print(f"[dim]auto-synced: +{report.pulled} from server, "
                       f"{report.pushed} pushed[/dim]")
@@ -480,6 +485,17 @@ def note(
             console.print("[yellow]Empty note — nothing saved.[/yellow]")
             return
     config = load_config()
+    # client role: the home server has WARM models — a note lands in ~a
+    # second instead of paying local embedder warm-up + sync on every jot
+    from .client import remote_api
+
+    remote = remote_api(config, "/notes",
+                        {"title": title, "content": content,
+                         "format": "markdown", "tags": tag or None})
+    if remote is not None:
+        console.print(f"[green]noted[/green]: {remote.get('title', '')} "
+                      "[dim](via server — reaches this device on next sync)[/dim]")
+        return
     repo = _open_repo()
     try:
         doc = create_note(repo, _embedder(config), title=title,

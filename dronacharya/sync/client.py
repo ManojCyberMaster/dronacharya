@@ -67,7 +67,8 @@ class SyncReport:
 _AUTO_SYNC_KEY = "__auto_sync_ts__"
 
 
-def maybe_auto_sync(repo, config: Config, *, quiet: bool = True) -> "SyncReport | None":
+def maybe_auto_sync(repo, config: Config, *, quiet: bool = True,
+                    on_start=None) -> "SyncReport | None":
     """Opportunistic reconcile implementing [sync] auto / interval_seconds:
     called by CLI commands after KB-touching work. Rate-limited via a
     timestamp in sync_state; never raises (offline is normal, not an error)."""
@@ -81,6 +82,8 @@ def maybe_auto_sync(repo, config: Config, *, quiet: bool = True) -> "SyncReport 
     if state and now - state[0] < config.sync.interval_seconds:
         return None
     repo.set_sync_state(_AUTO_SYNC_KEY, now, "auto")
+    if on_start is not None:
+        on_start()
     try:
         return sync_once(repo, config)
     except Exception:  # noqa: BLE001 — offline/unreachable: try again next interval

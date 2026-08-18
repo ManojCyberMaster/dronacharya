@@ -164,7 +164,8 @@ def save_html(request: Request, body: SaveHtmlBody, background: BackgroundTasks)
 
 
 # ------------------------------------------------------------------- search
-from ..models import doc_capabilities as _doc_capabilities  # noqa: E402, unit_index_text
+from ..models import doc_capabilities as _doc_capabilities  # noqa: E402
+from ..models import unit_index_text  # noqa: E402  # noqa: E402, unit_index_text
 from ..search import result_to_json as _result_json  # noqa: E402
 
 
