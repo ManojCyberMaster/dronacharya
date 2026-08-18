@@ -13,7 +13,7 @@ model provider at all.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh     # install uv (once)
-uv tool install "dronacharya[server] @ git+https://github.com/<you>/dronacharya.git"
+uv tool install "dronacharya[server] @ git+https://github.com/ManojCyberMaster/dronacharya.git"
 dc init                                             # config + KB + embedding model (one-time download)
 dc save https://en.wikipedia.org/wiki/Retrieval-augmented_generation
 dc add ~/Documents/report.docx        # local files too: pdf/docx/xlsx/pptx/md/txt

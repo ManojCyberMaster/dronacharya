@@ -7,7 +7,7 @@ is [uv](https://docs.astral.sh/uv/) (single binary, no Python setup needed).
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh    # install uv (once)
-uv tool install "dronacharya[server] @ git+https://github.com/<you>/dronacharya.git"
+uv tool install "dronacharya[server] @ git+https://github.com/ManojCyberMaster/dronacharya.git"
 # or from a local clone:
 #   git clone <repo> && uv tool install "./dronacharya[server]"
 dc init                    # creates ~/.dronacharya/config.toml + the KB
@@ -17,7 +17,7 @@ dc init                    # creates ~/.dronacharya/config.toml + the KB
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-uv tool install "dronacharya[server] @ git+https://github.com/<you>/dronacharya.git"
+uv tool install "dronacharya[server] @ git+https://github.com/ManojCyberMaster/dronacharya.git"
 dc init
 ```
 
