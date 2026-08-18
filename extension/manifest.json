@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DronaCharya — Save to my knowledge base",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Sends the page you explicitly save to your own DronaCharya server. No tracking, no third parties — your data goes only to the server URL you configure. Includes to-do reminders synced with your knowledge base.",
   "permissions": ["activeTab", "scripting", "storage", "contextMenus", "alarms", "notifications"],
   "host_permissions": [

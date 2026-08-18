@@ -115,6 +115,21 @@ function dcOverlayMain() {
                    cursor: pointer; background: #0b6e4f; color: #fff; }
       button.ghostb { background: transparent; color: #0b6e4f; border: 1px solid #0b6e4f; }
       button.danger { background: transparent; color: #b3261e; border: 1px solid #b3261e; }
+      input[type=text] { width: 100%; box-sizing: border-box; padding: 7px 9px;
+                 border: 1px solid #d8d6cf; border-radius: 7px; font: inherit;
+                 background: #fff; margin-bottom: 8px; }
+      .ntbar { display: none; gap: 2px; margin-bottom: 6px; }
+      .ntbar button { border: 1px solid transparent; background: transparent;
+                 border-radius: 5px; padding: 2px 9px; font: inherit; cursor: pointer; }
+      .ntbar button:hover { border-color: #d8d6cf; }
+      #nt-md { width: 100%; box-sizing: border-box; min-height: 200px;
+                 resize: vertical; padding: 8px 10px; border: 1px solid #d8d6cf;
+                 border-radius: 7px; font: 13px/1.5 ui-monospace, monospace;
+                 background: #fff; }
+      #nt-rich { display: none; min-height: 200px; border: 1px solid #d8d6cf;
+                 border-radius: 7px; padding: 10px; background: #fff; overflow: auto; }
+      .fmt-row { display: flex; gap: 14px; margin-bottom: 8px; font-size: 12.5px; }
+      .fmt-row label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
       pre.diff { white-space: pre-wrap; background: #fff7e0; border: 1px solid #e0c56e;
                  border-radius: 7px; padding: 8px; font: 12px/1.5 ui-monospace, monospace; }
       .big { font-size: 15px; }
@@ -188,6 +203,52 @@ function dcOverlayMain() {
         send("keep", { summary: el(".sum").value.trim(),
                        units: kept.length ? kept : units });
         render({ phase: "progress", label: "Saving…", pct: 80 });
+      }));
+    } else if (msg.phase === "note-editor") {
+      head.innerHTML = `<b>New note</b>
+        <span class="muted">— straight into your knowledge base</span>`;
+      body.innerHTML = `
+        <input type="text" id="nt-title" placeholder="title (optional — first heading otherwise)">
+        <div class="fmt-row">
+          <label><input type="radio" name="nt-fmt" value="markdown" checked> Markdown</label>
+          <label><input type="radio" name="nt-fmt" value="rich"> Rich text</label>
+        </div>
+        <div class="ntbar">
+          <button data-cmd="bold"><b>B</b></button>
+          <button data-cmd="italic"><i>I</i></button>
+          <button data-cmd="underline"><u>U</u></button>
+          <button data-cmd="strikeThrough"><s>S</s></button>
+          <button data-cmd="insertUnorderedList">•≡</button>
+          <button data-cmd="insertOrderedList">1≡</button>
+        </div>
+        <textarea id="nt-md" placeholder="# Heading&#10;&#10;your note — headings become sections…"></textarea>
+        <div id="nt-rich" contenteditable="true"></div>
+        <input type="text" id="nt-tags" placeholder="tags, comma separated (optional)" style="margin-top:8px">`;
+      let fmt = "markdown";
+      const applyFmt = () => {
+        el("#nt-md").style.display = fmt === "markdown" ? "block" : "none";
+        el("#nt-rich").style.display = fmt === "rich" ? "block" : "none";
+        el(".ntbar").style.display = fmt === "rich" ? "flex" : "none";
+      };
+      root.querySelectorAll('input[name="nt-fmt"]').forEach(r =>
+        r.onchange = () => { fmt = r.value; applyFmt(); });
+      el(".ntbar").querySelectorAll("[data-cmd]").forEach(b => {
+        b.onmousedown = (e) => e.preventDefault();
+        b.onclick = () => document.execCommand(b.dataset.cmd);
+      });
+      if (msg.prefill) el("#nt-md").value = msg.prefill;
+      applyFmt();
+      (msg.prefill ? el("#nt-title") : el("#nt-md")).focus();
+      foot.appendChild(button("ghostb", "Cancel", () => { send("cancel"); close(); }));
+      foot.appendChild(button("", "Save note", () => {
+        const content = fmt === "rich" ? el("#nt-rich").innerHTML : el("#nt-md").value;
+        const plain = fmt === "rich" ? el("#nt-rich").textContent : content;
+        if (!plain.trim()) return;
+        send("note-save", { title: el("#nt-title").value.trim(), content,
+                            format: fmt,
+                            tags: el("#nt-tags").value.split(",")
+                              .map(t => t.trim()).filter(Boolean) });
+        render({ phase: "progress", label: "Saving note…", pct: 60 });
       }));
     } else if (msg.phase === "confirm") {
       head.innerHTML = `<b>Send this page to your knowledge base?</b>`;
@@ -347,6 +408,26 @@ async function handleReviewAction(tabId, msg) {
   if (!flow) return;
   const cfg = await settings();
   const base = cfg.serverUrl.replace(/\/$/, "");
+  if (msg.action === "note-save") {
+    const cfg = await settings();
+    let resp;
+    try {
+      resp = await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/notes", {
+        method: "POST", headers: apiHeaders(cfg),
+        body: JSON.stringify({ title: msg.title, content: msg.content,
+                               format: msg.format, tags: msg.tags }),
+      });
+    } catch {
+      return showOverlay(tabId, { phase: "error",
+        detail: "Your DronaCharya server is unreachable." });
+    }
+    if (!resp.ok)
+      return showOverlay(tabId, { phase: "error",
+        detail: "Could not save the note (" + resp.status + ")." });
+    const out = await resp.json().catch(() => ({}));
+    return showOverlay(tabId, { phase: "done",
+      label: "✓ Noted: " + (out.title || "saved") });
+  }
   if (msg.action === "upload") return startSave(tabId, false);
   if (msg.action === "overwrite") return startSave(tabId, true);
   if (msg.action === "cancel") { flows.delete(tabId); return; }
@@ -389,6 +470,11 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "dc-save",
     title: "Save page to DronaCharya",
+    contexts: ["page", "selection"],
+  });
+  chrome.contextMenus.create({
+    id: "dc-note",
+    title: "New DronaCharya note",
     contexts: ["page", "selection"],
   });
   chrome.alarms.create("dc-todo-refresh", { periodInMinutes: 30 });
@@ -447,9 +533,24 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   chrome.storage.local.remove("txt-" + alarm.name);
 });
 
+async function runNoteFlow(tabId, prefill = "") {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, func: dcOverlayMain });
+  } catch {
+    return false;   // unscriptable page — popup falls back to its inline form
+  }
+  await showOverlay(tabId, { phase: "note-editor", prefill });
+  return true;
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== "dc-save" || !tab?.id) return;
-  runSaveFlow(tab.id, {});
+  if (!tab?.id) return;
+  if (info.menuItemId === "dc-save") runSaveFlow(tab.id, {});
+  if (info.menuItemId === "dc-note")
+    runNoteFlow(tab.id, info.selectionText
+      ? "> " + info.selectionText.replace(/\n/g, "\n> ")
+        + "\n— from " + (info.pageUrl || tab.url || "") + "\n\n"
+      : "");
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -459,6 +560,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg.type === "save-flow") {
       runSaveFlow(msg.tabId, msg.options || {});
       sendResponse({ ok: true });
+    } else if (msg.type === "note-flow") {
+      sendResponse({ ok: await runNoteFlow(msg.tabId) });
     } else if (msg.type === "dc-action" && sender.tab?.id != null) {
       await handleReviewAction(sender.tab.id, msg);
       sendResponse({ ok: true });

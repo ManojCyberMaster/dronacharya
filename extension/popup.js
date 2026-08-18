@@ -224,7 +224,14 @@ init();
 
 
 // ------------------------------ direct notes -------------------------------
-$("note-open").onclick = () => {
+$("note-open").onclick = async () => {
+  // preferred: the roomy ON-PAGE modal (same as the save flow); the inline
+  // popup form is only the fallback for unscriptable pages (chrome:// etc.)
+  if (currentTabId != null) {
+    const out = await chrome.runtime.sendMessage({ type: "note-flow",
+                                                   tabId: currentTabId });
+    if (out && out.ok) { window.close(); return; }
+  }
   $("note-closed").style.display = "none";
   $("note-form").style.display = "block";
   $("note-md").focus();
