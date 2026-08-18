@@ -207,10 +207,10 @@ set up SearxNG so fallback answers get grounded (and can be high-confidence).
 
 **`dc search` says "No." but I think it should match.**
 Below-threshold results are hidden on purpose; `--all` shows them. The
-threshold (`retrieval.min_relevance`, reranked-probability scale) is tuned
-against the golden eval set — if you change it, run
-`DC_RUN_EVALS=1 pytest tests/test_eval_retrieval.py`. Never disable
-reranking if you care about honest refusals.
+threshold (`retrieval.min_relevance`, reranked-probability scale) is
+calibrated against a golden evaluation set (accepts >=90% of covered
+questions, refuses 100% of off-corpus ones). Never disable reranking if you
+care about honest refusals.
 
 **"embedding model changed … run `dc reembed`".**
 A KB is bound to one embedding model (mixing vectors corrupts search). You

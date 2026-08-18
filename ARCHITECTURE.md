@@ -163,9 +163,9 @@ query ──► vector candidates ───────┘        top ~30       
 - The **cross-encoder reranker** defaults to `"on"` (small enough for CPU;
   `"auto"` restricts it to CUDA machines). Its scores are sigmoid-normalized
   probabilities in (0,1) — one calibrated scale on every machine — gated by
-  `retrieval.min_relevance` (default 0.30, tuned against the golden eval set
-  in `tests/test_eval_retrieval.py`: ≥90% acceptance of covered questions,
-  100% refusal of off-corpus ones). Raw RRF scores (only when `rerank="off"`)
+  `retrieval.min_relevance` (default 0.30, tuned against a golden evaluation
+  set: ≥90% acceptance of covered questions, 100% refusal of off-corpus
+  ones). Raw RRF scores (only when `rerank="off"`)
   are rank-based and cannot express "nothing matches"; they get their own
   threshold and honest documentation of that weakness.
 - `dc search` refuses to show below-threshold garbage (say "No" instead);

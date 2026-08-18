@@ -18,9 +18,9 @@ exists, so they cannot express "nothing matches." That's why reranking
 defaults to on (the model is small enough for CPU) and why the thresholds
 are separate: comparing one number against both scales was a bug class.
 
-`min_relevance` is tuned against the golden evaluation set
-(`tests/test_eval_retrieval.py`): it must accept ≥90% of covered questions
-while refusing 100% of off-corpus ones. Change the threshold → run the eval.
+`min_relevance` is tuned against a golden evaluation set: it must accept
+≥90% of covered questions while refusing 100% of off-corpus ones — threshold
+changes are validated against that harness, not anecdotes.
 
 ## The answer ladder (quick answers)
 

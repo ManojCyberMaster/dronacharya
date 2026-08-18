@@ -9,17 +9,14 @@ uv venv && uv pip install -e ".[server,dev]"
 
 ## Quality bars
 
-- Tests accompany behavior changes; the suite must stay hermetic
-  (fixtures pin `rerank = "off"` and a fake embedder — never depend on
-  host CUDA or network).
-- Retrieval-affecting changes must keep the golden eval green:
-  `DC_RUN_EVALS=1 pytest tests/test_eval_retrieval.py` (loads real models).
-- Lint: `ruff check .` (config in pyproject.toml).
+- Lint: `ruff check .` (config in pyproject.toml) must be clean.
+- The maintainer validates changes against a comprehensive private test
+  suite (unit, integration, golden retrieval evals, browser E2E) before
+  merging — describe how you verified your change in the PR.
 - Dependencies must be permissively licensed (Apache/MIT/BSD — no
   AGPL/GPL/SSPL). SearxNG is used only as an external HTTP service.
-- Web UI changes: verify in a real browser (headless Chromium works —
-  see tests' Playwright usage) — code inspection alone has repeatedly
-  missed visual/interaction bugs here.
+- Web UI changes: verify in a real browser and say so in the PR — code
+  inspection alone has repeatedly missed visual/interaction bugs here.
 
 ## Architecture ground rules
 
