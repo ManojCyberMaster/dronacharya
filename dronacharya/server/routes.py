@@ -82,6 +82,13 @@ class MindmapBody(BaseModel):
     title: str | None = None
 
 
+class NoteBody(BaseModel):
+    content: str = Field(min_length=1, max_length=200_000)
+    title: str = Field("", max_length=200)
+    format: str = "markdown"          # markdown | rich
+    tags: list[str] | None = None
+
+
 class UnitsBody(BaseModel):
     # full replacement list [{text, kind?, heading_path?}]
     units: list[dict] = Field(max_length=500)
@@ -467,12 +474,63 @@ def get_document(request: Request, document_id: str):
             "summary": doc.summary, "saved_note": doc.saved_note,
             "distilled": doc.distilled, "tags": repo.get_tags(doc.id),
             "capabilities": _doc_capabilities(doc.source_type),
+            "note_format": (doc.meta or {}).get("note_format"),
+            "note_title_explicit": (doc.meta or {}).get("note_title_explicit"),
+            "note_source": (doc.meta or {}).get("note_source"),
             "units": [{"seq": u.seq, "kind": u.kind,
                        "heading_path": u.heading_path, "text": u.text}
                       for u in units],
         }
     finally:
         repo.close()
+
+
+@router.post("/notes")
+def create_note_route(request: Request, body: NoteBody):
+    """Direct note — typed knowledge, no page or file behind it."""
+    from ..notes import create_note
+
+    if body.format not in ("markdown", "rich"):
+        return JSONResponse({"detail": "format must be markdown|rich"},
+                            status_code=400)
+    with _COMMIT_LOCK:
+        repo = open_repo(request)
+        try:
+            try:
+                doc = create_note(repo, request.app.state.embedder,
+                                  title=body.title, content=body.content,
+                                  fmt=body.format, tags=body.tags)
+            except ValueError as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+            return {"id": doc.id, "title": doc.title, "format": body.format}
+        finally:
+            repo.close()
+
+
+@router.put("/notes/{document_id}")
+def update_note_route(request: Request, document_id: str, body: NoteBody):
+    from ..notes import update_note
+
+    if body.format not in ("markdown", "rich"):
+        return JSONResponse({"detail": "format must be markdown|rich"},
+                            status_code=400)
+    with _COMMIT_LOCK:
+        repo = open_repo(request)
+        try:
+            doc = repo.get_document(document_id)
+            if doc is None:
+                return JSONResponse({"detail": "not found"}, status_code=404)
+            if doc.source_type != "note":
+                return JSONResponse({"detail": "not a note"}, status_code=400)
+            try:
+                doc = update_note(repo, request.app.state.embedder, doc,
+                                  title=body.title, content=body.content,
+                                  fmt=body.format, tags=body.tags)
+            except ValueError as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+            return {"id": doc.id, "title": doc.title}
+        finally:
+            repo.close()
 
 
 @router.put("/documents/{document_id}/units")

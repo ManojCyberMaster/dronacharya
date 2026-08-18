@@ -133,3 +133,7 @@ document.addEventListener("drop", (e) => {
   dragDepth = 0; dropzone.classList.remove("show");
   if (e.dataTransfer?.files?.length) uploadFiles(e.dataTransfer.files);
 });
+
+
+document.getElementById("newnote").onclick = () =>
+  window.DC.openNoteEditor({ onSaved: () => { loadDocs(); loadTags(); } });

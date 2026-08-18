@@ -221,3 +221,45 @@ $("question").addEventListener("keydown", async (e) => {
 });
 
 init();
+
+
+// ------------------------------ direct notes -------------------------------
+$("note-open").onclick = () => {
+  $("note-closed").style.display = "none";
+  $("note-form").style.display = "block";
+  $("note-md").focus();
+};
+$("note-rich").onchange = () => {
+  const rich = $("note-rich").checked;
+  $("note-md").style.display = rich ? "none" : "block";
+  $("note-richbox").style.display = rich ? "block" : "none";
+  $("note-bar").style.display = rich ? "flex" : "none";
+};
+document.querySelectorAll("#note-bar [data-cmd]").forEach(b => {
+  b.onmousedown = (e) => e.preventDefault();
+  b.onclick = () => document.execCommand(b.dataset.cmd);
+});
+$("note-save").onclick = async () => {
+  const rich = $("note-rich").checked;
+  const content = rich ? $("note-richbox").innerHTML : $("note-md").value;
+  const plain = rich ? $("note-richbox").textContent : content;
+  if (!plain.trim()) { $("note-result").textContent = "Note is empty."; return; }
+  const cfg = await settings();
+  const tags = $("note-tags").value.split(",").map(t => t.trim()).filter(Boolean);
+  let resp;
+  try {
+    resp = await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/notes", {
+      method: "POST", headers: apiHeaders(cfg),
+      body: JSON.stringify({ title: $("note-title").value.trim(),
+                             content, format: rich ? "rich" : "markdown", tags }),
+    });
+  } catch { $("note-result").textContent = "Server unreachable."; return; }
+  if (!resp.ok) {
+    $("note-result").textContent = "Could not save (" + resp.status + ").";
+    return;
+  }
+  const out = await resp.json();
+  $("note-result").textContent = "✓ Saved: " + out.title;
+  $("note-md").value = ""; $("note-richbox").innerHTML = "";
+  $("note-title").value = ""; $("note-tags").value = "";
+};

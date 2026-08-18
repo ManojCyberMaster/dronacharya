@@ -305,7 +305,17 @@
     // units
     const unitsEl = wrap.querySelector("#dv-units");
     const editable = !ownedElsewhere;
-    if (!editable) {
+    if (!editable && caps.editor === "note") {
+      unitsEl.innerHTML = "";
+      const btn = document.createElement("button");
+      btn.textContent = "Edit note";
+      btn.style.marginBottom = "10px";
+      btn.onclick = () => {
+        m.close();
+        window.DC.openNoteEditor({ doc, onSaved: changed });
+      };
+      unitsEl.appendChild(btn);
+    } else if (!editable) {
       const page = caps.editor === "todo" ? "/todos" : "/" + caps.editor;
       const what = caps.editor === "todo" ? "the To-dos page" : "the mind-map editor";
       unitsEl.innerHTML = `<div class="muted" style="margin-bottom:10px">
@@ -387,7 +397,89 @@
     };
   }
 
+  function openNoteEditor(opts = {}) {
+    // opts: { doc?, onSaved? } — doc present = edit mode (format is fixed)
+    const doc = opts.doc || null;
+    const fmt0 = doc ? (doc.note_format || "markdown") : "markdown";
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `
+      <input id="nt-title" type="text" placeholder="title (optional — first heading otherwise)"
+             style="width:100%; box-sizing:border-box; margin-bottom:8px">
+      ${doc ? "" : `<div class="row" style="margin-bottom:8px">
+        <label style="display:inline-flex;gap:5px;align-items:center">
+          <input type="radio" name="nt-fmt" value="markdown" checked> Markdown</label>
+        <label style="display:inline-flex;gap:5px;align-items:center">
+          <input type="radio" name="nt-fmt" value="rich"> Rich text</label></div>`}
+      <div id="nt-richbar" class="wtb" style="display:none">
+        <button data-cmd="bold" title="Bold"><b>B</b></button>
+        <button data-cmd="italic" title="Italic"><i>I</i></button>
+        <button data-cmd="underline" title="Underline"><u>U</u></button>
+        <button data-cmd="strikeThrough" title="Strike"><s>S</s></button>
+        <button data-cmd="insertUnorderedList" title="Bullet list">•≡</button>
+        <button data-cmd="insertOrderedList" title="Numbered list">1≡</button>
+        <button data-cmd="removeFormat" title="Clear formatting">⌫ᵃ</button>
+      </div>
+      <textarea id="nt-md" placeholder="# Heading\n\nYour note — headings become sections…"
+        style="width:100%; box-sizing:border-box; min-height:220px; resize:vertical;
+               font-family:ui-monospace,monospace; display:none"></textarea>
+      <div id="nt-rich" contenteditable="true" style="display:none; min-height:220px;
+        border:1px solid var(--border); border-radius:8px; padding:10px;
+        background:var(--panel); overflow:auto"></div>
+      <input id="nt-tags" type="text" placeholder="tags, comma separated (optional)"
+             style="width:100%; box-sizing:border-box; margin-top:8px">
+      <div class="row" style="margin-top:12px; justify-content:flex-end">
+        <button id="nt-save">Save note</button>
+      </div>`;
+    const m = modal(doc ? "Edit note" : "New note", wrap);
+    const q = (sel) => wrap.querySelector(sel);
+    let fmt = fmt0;
+    const applyFmt = () => {
+      q("#nt-md").style.display = fmt === "markdown" ? "block" : "none";
+      q("#nt-rich").style.display = fmt === "rich" ? "block" : "none";
+      q("#nt-richbar").style.display = fmt === "rich" ? "flex" : "none";
+    };
+    wrap.querySelectorAll('input[name="nt-fmt"]').forEach(r =>
+      r.onchange = () => { fmt = r.value; applyFmt(); });
+    q("#nt-richbar").querySelectorAll("[data-cmd]").forEach(b => {
+      b.onmousedown = (e) => e.preventDefault();   // keep editor selection
+      b.onclick = () => document.execCommand(b.dataset.cmd);
+    });
+    if (doc) {
+      if (doc.note_title_explicit) q("#nt-title").value = doc.title || "";
+      else q("#nt-title").placeholder = `title (currently derived: ${doc.title})`;
+      q("#nt-tags").value = (doc.tags || []).join(", ");
+      if (fmt === "rich") q("#nt-rich").innerHTML = doc.note_source || "";
+      else q("#nt-md").value = doc.note_source || "";
+    }
+    applyFmt();
+    q("#nt-save").onclick = async () => {
+      const content = fmt === "rich" ? q("#nt-rich").innerHTML
+                                     : q("#nt-md").value;
+      if (!(fmt === "rich" ? q("#nt-rich").textContent : content).trim()) {
+        toast("The note is empty", "error"); return;
+      }
+      const tags = q("#nt-tags").value.split(",").map(t => t.trim())
+        .filter(Boolean);
+      const resp = await fetch(doc ? `/api/v1/notes/${doc.id}` : "/api/v1/notes", {
+        method: doc ? "PUT" : "POST", headers: headers(),
+        body: JSON.stringify({ title: q("#nt-title").value.trim(),
+                               content, format: fmt, tags }),
+      });
+      if (!resp.ok) {
+        toast((await resp.json().catch(() => ({}))).detail || "save failed",
+              "error");
+        return;
+      }
+      toast("Note saved — searchable now");
+      knownTags(true);
+      m.close();
+      if (opts.onSaved) opts.onSaved();
+    };
+    (fmt === "rich" ? q("#nt-rich") : q("#nt-md")).focus();
+  }
+
   window.DC = { headers, esc, modal, toast, openDocument, promptModal,
+                openNoteEditor,
                 knownTags, attachTagSuggest, onToken: null };
   buildShell();
 })();

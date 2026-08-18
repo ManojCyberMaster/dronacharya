@@ -26,6 +26,7 @@ class SourceType(StrEnum):
     PDF = "pdf"
     MINDMAP = "mindmap"  # web-UI-authored mind map; nodes are corpus units
     TODO = "todo"        # to-do reminder (extension / future mobile); syncs + searchable
+    NOTE = "note"        # direct note (web/extension/CLI); editor-owned like mindmaps
 
 
 class UnitKind(StrEnum):
@@ -73,7 +74,7 @@ def doc_capabilities(source_type: str) -> dict:
     """Server-declared per-document behavior so no client hardcodes
     source_type checks: whether units are editable in place, and which
     dedicated editor (if any) owns the document."""
-    editor = source_type if source_type in ("mindmap", "todo") else None
+    editor = source_type if source_type in ("mindmap", "todo", "note") else None
     return {"editable_units": editor is None, "editor": editor}
 
 

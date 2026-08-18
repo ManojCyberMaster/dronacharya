@@ -59,6 +59,29 @@
   </div>
 
   <div class="section">
+    <h2>New note</h2>
+    <div id="note-closed"><button id="note-open" class="secondary">Write a note…</button></div>
+    <div id="note-form" style="display:none">
+      <input id="note-title" type="text" placeholder="title (optional)">
+      <label style="margin-top:6px"><input id="note-rich" type="checkbox">
+        rich text (unchecked = markdown)</label>
+      <div id="note-bar" style="display:none; gap:2px; margin-top:6px">
+        <button type="button" class="secondary" data-cmd="bold" style="padding:2px 9px"><b>B</b></button>
+        <button type="button" class="secondary" data-cmd="italic" style="padding:2px 9px"><i>I</i></button>
+        <button type="button" class="secondary" data-cmd="underline" style="padding:2px 9px"><u>U</u></button>
+        <button type="button" class="secondary" data-cmd="insertUnorderedList" style="padding:2px 9px">•≡</button>
+      </div>
+      <textarea id="note-md" placeholder="# Heading&#10;&#10;your note…"></textarea>
+      <div id="note-richbox" contenteditable="true" style="display:none; min-height:90px;
+        border:1px solid #d8d6cf; border-radius:6px; padding:8px; margin-top:4px;
+        background:#fff"></div>
+      <input id="note-tags" type="text" placeholder="tags, comma separated (optional)">
+      <button id="note-save">Save to knowledge base</button>
+      <div id="note-result" class="muted"></div>
+    </div>
+  </div>
+
+  <div class="section">
     <h2>To-dos <span class="muted" id="todoCount"></span></h2>
     <div id="todoList" class="muted">loading…</div>
     <input id="todoText" type="text" placeholder="new to-do… (Enter to add)">

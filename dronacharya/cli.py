@@ -445,6 +445,53 @@ def query(
 
 
 @app.command()
+def note(
+    text: str = typer.Argument(None, help="Note text (markdown). Omit to "
+                               "open $EDITOR"),
+    title: str = typer.Option("", "--title", help="Title (default: first "
+                              "heading or line)"),
+    tag: list[str] = typer.Option([], "--tag", "-t"),
+    file: Path = typer.Option(None, "--file", "-f",
+                              help="Read the note from a markdown file"),
+):
+    """Jot a note straight into your knowledge base (markdown).
+    `dc note "remember: fsck the git image from the host"` — or run with no
+    text to write a longer note in your $EDITOR."""
+    import os
+    import subprocess
+    import tempfile
+
+    from .notes import create_note
+
+    if file is not None:
+        content = file.expanduser().read_text(encoding="utf-8")
+    elif text:
+        content = text
+    else:
+        editor = os.environ.get("EDITOR", "nano")
+        with tempfile.NamedTemporaryFile("w+", suffix=".md",
+                                         delete=False) as tf:
+            tf.write("# \n\n")
+            path = tf.name
+        subprocess.run([editor, path], check=False)
+        content = Path(path).read_text(encoding="utf-8")
+        Path(path).unlink(missing_ok=True)
+        if not content.strip() or content.strip() == "#":
+            console.print("[yellow]Empty note — nothing saved.[/yellow]")
+            return
+    config = load_config()
+    repo = _open_repo()
+    try:
+        doc = create_note(repo, _embedder(config), title=title,
+                          content=content, fmt="markdown",
+                          tags=tag or None)
+        console.print(f"[green]noted[/green]: {doc.title}")
+        _auto_sync(config, repo)
+    finally:
+        repo.close()
+
+
+@app.command()
 def add(
     paths: list[Path] = typer.Argument(..., help="Files or directories "
                                        "(pdf/docx/xlsx/pptx/md/txt/tdl)"),
