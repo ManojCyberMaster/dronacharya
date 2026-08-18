@@ -759,12 +759,27 @@ def doctor():
             row(ok, "provider vllm", config.llm.vllm_url
                 + ("" if ok else " unreachable"))
 
-    # searxng
+    # searxng — local config OR delegated to the home server ("via server"
+    # asks are grounded by the SERVER's searxng, not this machine's)
+    server_features = {}
+    if config.deployment.role == "client" and config.server.remote_url:
+        try:
+            import json as json_mod
+
+            with urllib.request.urlopen(
+                    config.server.remote_url.rstrip("/") + "/api/v1/status",
+                    timeout=4) as r:
+                server_features = json_mod.loads(r.read()).get("features", {})
+        except Exception:  # noqa: BLE001 — offline: local rows still valid
+            pass
     if config.websearch.searx_url:
         ok = ping(config.websearch.searx_url.rstrip("/")
                   + "/search?q=doctor&format=json")
         row(ok, "searxng", config.websearch.searx_url +
             ("" if ok else " unreachable or json format disabled"))
+    elif server_features.get("searxng"):
+        row(True, "searxng", "grounded via your home server "
+            "(local fallback answers stay ungrounded)")
     else:
         row(None, "searxng", "not configured — web answers stay ungrounded/low")
 

@@ -774,6 +774,15 @@ def sync_notes(request: Request):
 def status(request: Request):
     repo = open_repo(request)
     try:
-        return {"app": "dronacharya", "version": __version__, "counts": repo.counts()}
+        config = request.app.state.config
+        return {"app": "dronacharya", "version": __version__,
+                "counts": repo.counts(),
+                # capability flags (booleans only — no config values leak):
+                # clients use these so e.g. `dc doctor` can say "grounding
+                # happens on the server" instead of a misleading local warning
+                "features": {
+                    "searxng": bool(config.websearch.searx_url),
+                    "llm": bool(config.llm.provider_order),
+                }}
     finally:
         repo.close()
