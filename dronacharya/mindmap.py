@@ -23,7 +23,7 @@ import hashlib
 import json
 import re
 
-from .models import Document, KnowledgeUnit, SourceType, UnitKind
+from .models import Document, KnowledgeUnit, SourceType, UnitKind, unit_index_text
 
 MAX_NODES = 2000
 NOTE_CHARS = 800          # how much of a node note enters the searchable unit
@@ -118,7 +118,7 @@ def save_mindmap(repo, embedder, data: dict, *, document_id: str | None = None,
     ]
     doc.summary = units[0].text[:300] if units else None
 
-    embeddings = embedder.embed_passages([u.text for u in units])
+    embeddings = embedder.embed_passages([unit_index_text(u) for u in units])
     if existing:
         repo.replace_document(doc, units, embeddings)
     else:

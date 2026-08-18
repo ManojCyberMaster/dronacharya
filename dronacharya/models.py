@@ -70,6 +70,16 @@ class KnowledgeUnit:
     lang: str | None = None
 
 
+def unit_index_text(unit) -> str:
+    """What gets EMBEDDED and FTS-INDEXED for a unit. Heading context makes
+    'second step' findable as part of 'Project > Deploy > second step' —
+    without it, TDL task hierarchies, docx section titles, and sheet names
+    were invisible to retrieval. Stored/displayed text stays verbatim."""
+    if unit.heading_path:
+        return f"{unit.heading_path} — {unit.text}"
+    return unit.text
+
+
 def doc_capabilities(source_type: str) -> dict:
     """Server-declared per-document behavior so no client hardcodes
     source_type checks: whether units are editable in place, and which

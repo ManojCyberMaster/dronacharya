@@ -164,7 +164,7 @@ def save_html(request: Request, body: SaveHtmlBody, background: BackgroundTasks)
 
 
 # ------------------------------------------------------------------- search
-from ..models import doc_capabilities as _doc_capabilities  # noqa: E402
+from ..models import doc_capabilities as _doc_capabilities  # noqa: E402, unit_index_text
 from ..search import result_to_json as _result_json  # noqa: E402
 
 
@@ -681,7 +681,7 @@ def _write_todo(repo, embedder, doc, text, done, due):
     doc.meta = {**(doc.meta or {}), "todo": {"done": done, "due": due}}
     units = [KnowledgeUnit(document_id=doc.id, seq=0, kind="note",
                            text=f"To-do: {text}")]
-    embeddings = embedder.embed_passages([units[0].text])
+    embeddings = embedder.embed_passages([unit_index_text(units[0])])
     if repo.get_document(doc.id) is None:
         repo.insert_document(doc, units, embeddings)
     else:

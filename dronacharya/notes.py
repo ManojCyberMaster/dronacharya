@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 
-from .models import Document, KnowledgeUnit, SourceType, UnitKind
+from .models import Document, KnowledgeUnit, SourceType, UnitKind, unit_index_text
 
 # same whitelist as the mind-map note editor (attributes always stripped)
 _KEEP = {"b", "i", "u", "s", "em", "strong", "p", "div", "br",
@@ -103,7 +103,7 @@ def _build(repo, embedder, doc: Document, title: str, content: str,
                            kind=UnitKind.NOTE, heading_path=heading,
                            lang=doc.lang)
              for i, (heading, text) in enumerate(sections)]
-    embeddings = embedder.embed_passages([u.text for u in units])
+    embeddings = embedder.embed_passages([unit_index_text(u) for u in units])
     if is_new:
         repo.insert_document(doc, units, embeddings)
     else:

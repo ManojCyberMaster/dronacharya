@@ -627,7 +627,7 @@ def reembed(
         for doc, units in list(repo.iter_documents_with_units()):
             if not units:
                 continue
-            embeddings = embedder.embed_passages([u.text for u in units])
+            embeddings = embedder.embed_passages([unit_index_text(u) for u in units])
             # local re-index only: same ids, no version bump, nothing to sync
             repo.replace_document(doc, units, embeddings, bump_version=False)
             done += 1
@@ -684,7 +684,7 @@ def conflicts(
             doc = _doc_from_payload(payload["doc"])
             units, embeddings = _units_from_payload(payload["units"])
             if any(not e for e in embeddings):
-                embeddings = _embedder(load_config()).embed_passages([u.text for u in units])
+                embeddings = _embedder(load_config()).embed_passages([unit_index_text(u) for u in units])
             if repo.get_document(doc.id):
                 repo.replace_document(doc, units, embeddings)  # bump → wins next sync
             else:

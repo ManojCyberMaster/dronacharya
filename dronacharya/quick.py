@@ -19,7 +19,7 @@ from .llm import get_provider_chain, run_complete
 from .llm.base import ProviderUnavailable
 from .llm.prompts import (QUICK_SEARX_SYSTEM, QUICK_SYSTEM, QUICK_WEB_SYSTEM,
                           RAG_USER, answer_language)
-from .models import Document, KnowledgeUnit, UnitKind
+from .models import Document, KnowledgeUnit, UnitKind, unit_index_text
 from .search import hybrid_search
 
 NOT_IN_KB = "NOT_IN_KB"
@@ -128,14 +128,16 @@ def quick_ask(
 
     reranker = get_reranker(config)
     sources = hybrid_search(
-        repo, embedder, question, top_k=6,
+        repo, embedder, question, top_k=8,
         candidates=config.retrieval.candidates, reranker=reranker,
     )
-    from .search import confidence_gate
-    confident = bool(sources) and sources[0].score >= confidence_gate(config, reranker)
     chain = chain if chain is not None else get_provider_chain(config, task="answer")
 
-    if confident:
+    # Try the KB whenever retrieval surfaced ANYTHING: the model reads the
+    # actual units and answers NOT_IN_KB when they don't cover the question —
+    # a far better judge than a similarity threshold, which silently skipped
+    # valid borderline matches straight to the (weaker) web path.
+    if sources:
         try:
             text, provider = run_complete(
                 chain, QUICK_SYSTEM.format(language=answer_language(question)),
@@ -281,7 +283,7 @@ def save_quick_answer(
     )
     units = [KnowledgeUnit(document_id=doc.id, seq=0, text=text,
                            kind=UnitKind.HOWTO, heading_path=question[:120])]
-    repo.insert_document(doc, units, embedder.embed_passages([u.text for u in units]))
+    repo.insert_document(doc, units, embedder.embed_passages([unit_index_text(u) for u in units]))
     repo.set_tags(doc.id, [QUICK_TAG])
     repo.log_event("quick_saved", {"document_id": doc.id, "source": source_url or ""})
     return doc.id

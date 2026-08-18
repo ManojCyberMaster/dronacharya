@@ -15,7 +15,7 @@ from ..config import Config
 from ..embeddings import Embedder
 from ..guardrails.pii import apply_pii_policy
 from ..guardrails.policy import get_policy
-from ..models import Document, KnowledgeUnit, SaveOutcome, UnitKind
+from ..models import Document, KnowledgeUnit, SaveOutcome, UnitKind, unit_index_text
 from . import extract as extract_mod
 from .fetch import allow_private_urls
 from .distill import get_distiller
@@ -129,7 +129,7 @@ def save_web(
         if note:
             doc.saved_note = note
         units = _units_from_distillation(doc, dist)
-        repo.replace_document(doc, units, embedder.embed_passages([u.text for u in units]))
+        repo.replace_document(doc, units, embedder.embed_passages([unit_index_text(u) for u in units]))
         status = "updated"
     else:
         doc = Document(
@@ -138,7 +138,7 @@ def save_web(
             distilled=dist.distilled, distill_tier=dist.tier, lang=extracted.lang,
         )
         units = _units_from_distillation(doc, dist)
-        repo.insert_document(doc, units, embedder.embed_passages([u.text for u in units]))
+        repo.insert_document(doc, units, embedder.embed_passages([unit_index_text(u) for u in units]))
         status = "created"
 
     if tags:
@@ -178,7 +178,7 @@ def redistill_document(repo, embedder: Embedder, config: Config, document_id: st
     doc.distill_tier = dist.tier
     new_units = _units_from_distillation(doc, dist)
     repo.replace_document(doc, new_units,
-                          embedder.embed_passages([u.text for u in new_units]))
+                          embedder.embed_passages([unit_index_text(u) for u in new_units]))
     repo.log_event("redistill", {"document_id": document_id, "tier": dist.tier})
     return True
 
@@ -228,7 +228,7 @@ def save_note_file(repo, embedder: Embedder, config: Config, path: Path) -> Save
                 heading_path=section.heading_path, lang=lang,
             )
         )
-    embeddings = embedder.embed_passages([u.text for u in units])
+    embeddings = embedder.embed_passages([unit_index_text(u) for u in units])
     if existing:
         repo.replace_document(doc, units, embeddings)
         status = "updated"

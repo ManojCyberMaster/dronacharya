@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Iterable
 
 from ..config import EMBEDDING_DIM
-from ..models import LOCAL_TENANT, Document, KnowledgeUnit, utcnow
+from ..models import (LOCAL_TENANT, Document, KnowledgeUnit,
+                      unit_index_text, utcnow)
 
 SCHEMA_VERSION = 1
 
@@ -248,7 +249,7 @@ class SqliteRepo:
             rid = cur.lastrowid
             cur.execute(
                 "INSERT INTO units_fts (rowid, text, title) VALUES (?,?,?)",
-                (rid, unit.text, doc.title),
+                (rid, unit_index_text(unit), doc.title),
             )
             if emb:   # vector-less unit (peer shipped none, no embedder yet):
                       # FTS still finds it; `dc reembed` adds the vector later

@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable
 
-from ..models import Document, KnowledgeUnit
+from ..models import Document, KnowledgeUnit, unit_index_text
 
 TIE_SECONDS = 2.0
 
@@ -136,7 +136,7 @@ def apply_ops(repo, ops: Iterable[dict], *, origin: str,
             units, embeddings = _units_from_payload(op["units"])
             if units and not any(embeddings) and embedder is not None:
                 # modern peers ship no vectors — derive them locally
-                embeddings = embedder.embed_passages([u.text for u in units])
+                embeddings = embedder.embed_passages([unit_index_text(u) for u in units])
             incoming_tags = op.get("tags") or []
 
             # deletions always win

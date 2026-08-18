@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS knowledge_units (
   kind TEXT NOT NULL,
   heading_path TEXT, lang TEXT,
   embedding vector({EMBEDDING_DIM}),
-  tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
+  tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(heading_path, '') || ' ' || text)) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_units_doc ON knowledge_units(document_id);
 CREATE INDEX IF NOT EXISTS idx_units_tsv ON knowledge_units USING GIN (tsv);
@@ -200,8 +200,19 @@ class PostgresRepo:
         cur = self.conn.cursor()
         cur.execute(_DDL)
         cur.execute("SELECT version FROM schema_version")
-        if cur.fetchone() is None:
-            cur.execute("INSERT INTO schema_version (version) VALUES (1)")
+        row = cur.fetchone()
+        if row is None:
+            cur.execute("INSERT INTO schema_version (version) VALUES (2)")
+        elif int(row[0]) < 2:
+            # v2: FTS covers heading context too — rebuild the generated col
+            cur.execute("ALTER TABLE knowledge_units DROP COLUMN IF EXISTS tsv")
+            cur.execute(
+                "ALTER TABLE knowledge_units ADD COLUMN tsv tsvector"
+                " GENERATED ALWAYS AS (to_tsvector('simple',"
+                " coalesce(heading_path, '') || ' ' || text)) STORED")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_units_tsv"
+                        " ON knowledge_units USING GIN (tsv)")
+            cur.execute("UPDATE schema_version SET version = 2")
         cur.execute(
             "INSERT INTO tenants (id, name, created_at) VALUES (%s,%s,%s)"
             " ON CONFLICT (id) DO NOTHING",

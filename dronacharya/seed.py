@@ -36,7 +36,7 @@ from .guardrails.pii import apply_pii_policy
 from .ingest import extract as extract_mod
 from .ingest.distill import Distiller, get_distiller
 from .ingest.pipeline import _hash
-from .models import Document, KnowledgeUnit
+from .models import Document, KnowledgeUnit, unit_index_text
 
 KIT_FORMAT = "dronacharya-seedkit/1"
 MAX_KIT_BYTES = 50 * 1024 * 1024
@@ -224,7 +224,7 @@ def install_kit(repo, embedder: Embedder, config: Config, kit: dict) -> InstallR
             )
             for i, u in enumerate(d["units"])
         ]
-        repo.insert_document(doc, units, embedder.embed_passages([u.text for u in units]))
+        repo.insert_document(doc, units, embedder.embed_passages([unit_index_text(u) for u in units]))
         if d.get("tags"):
             # legacy kits carried a "seed/" tag prefix; the topic alone is
             # what means something to the user
