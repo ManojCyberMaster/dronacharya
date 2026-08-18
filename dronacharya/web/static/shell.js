@@ -438,8 +438,61 @@
       q("#nt-rich").style.display = fmt === "rich" ? "block" : "none";
       q("#nt-richbar").style.display = fmt === "rich" ? "flex" : "none";
     };
+  const mdToHtml = (md) => {
+      const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const inline = (t) => esc(t)
+        .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+        .replace(/\*([^*]+)\*/g, "<i>$1</i>");
+      const out = [];
+      let list = null;   // "ul" | "ol" | null
+      const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+      md.split("\n").forEach((line) => {
+        const h = line.match(/^(#{1,3})\s+(.*)$/);
+        const ul = line.match(/^\s*[-*]\s+(.*)$/);
+        const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        if (h) { closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); }
+        else if (ul) { if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
+                       out.push(`<li>${inline(ul[1])}</li>`); }
+        else if (ol) { if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
+                       out.push(`<li>${inline(ol[1])}</li>`); }
+        else if (!line.trim()) { closeList(); out.push("<div><br></div>"); }
+        else { closeList(); out.push(`<div>${inline(line)}</div>`); }
+      });
+      closeList();
+      return out.join("");
+    };
+    const htmlToMd = (html) => {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      const walk = (node, ctx) => {
+        let out = "";
+        node.childNodes.forEach((c) => {
+          if (c.nodeType === 3) { out += c.textContent; return; }
+          const tag = (c.tagName || "").toLowerCase();
+          if (tag === "br") { out += "\n"; return; }
+          const inner = walk(c, tag === "ol" || tag === "ul" ? tag : ctx);
+          if (/^h[1-3]$/.test(tag)) out += "\n" + "#".repeat(+tag[1]) + " " + inner.trim() + "\n";
+          else if (tag === "b" || tag === "strong") out += inner.trim() ? `**${inner}**` : inner;
+          else if (tag === "i" || tag === "em") out += inner.trim() ? `*${inner}*` : inner;
+          else if (tag === "li") out += "\n" + (ctx === "ol" ? "1. " : "- ") + inner.trim();
+          else if (tag === "ul" || tag === "ol") out += inner + "\n";
+          else if (tag === "div" || tag === "p" || tag === "blockquote") out += "\n" + inner;
+          else out += inner;
+        });
+        return out;
+      };
+      return walk(tpl.content, null).replace(/\n{3,}/g, "\n\n").trim();
+    };
+
     wrap.querySelectorAll('input[name="nt-fmt"]').forEach(r =>
-      r.onchange = () => { fmt = r.value; applyFmt(); });
+      r.onchange = () => {
+        // CARRY the note across the switch — never discard typed content
+        if (r.value === "rich" && fmt === "markdown")
+          q("#nt-rich").innerHTML = mdToHtml(q("#nt-md").value);
+        else if (r.value === "markdown" && fmt === "rich")
+          q("#nt-md").value = htmlToMd(q("#nt-rich").innerHTML);
+        fmt = r.value; applyFmt();
+      });
     q("#nt-richbar").querySelectorAll("[data-cmd]").forEach(b => {
       b.onmousedown = (e) => e.preventDefault();   // keep editor selection
       b.onclick = () => document.execCommand(b.dataset.cmd);
