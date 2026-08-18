@@ -33,12 +33,21 @@
     document.body.classList.add("side-min");
 
   function buildShell() {
+    // favicon for every page, injected once here instead of per-HTML-file
+    if (!document.querySelector('link[rel="icon"]')) {
+      const icon = document.createElement("link");
+      icon.rel = "icon";
+      icon.type = "image/png";
+      icon.href = "/static/favicon.png";
+      document.head.appendChild(icon);
+    }
     const page = document.body.dataset.page || "ask";
     const aside = document.createElement("aside");
     aside.className = "side";
     aside.innerHTML = `
-      <div class="brand"><span class="bow">🏹</span>
-        <span class="name"><span class="grad">Drona</span>Charya</span></div>
+      <div class="brand"><img class="logo" src="/static/logo.png" alt=""
+          onerror="this.outerHTML='<span class=&quot;bow&quot;>🏹</span>'">
+        <span class="name indic"><span class="grad">Drona</span>Charya</span></div>
       <nav>${NAV.map(([k, href, label]) =>
         `<a href="${href}" class="${k === page ? "active" : ""}" title="${label}">
            ${ICONS[k]}<span>${label}</span></a>`).join("")}

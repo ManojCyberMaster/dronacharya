@@ -597,3 +597,24 @@ kbd { background: var(--panel-2); border: 1px solid var(--border);
   pointer-events: none;      /* the document-level drop handler does the work */
 }
 .dropzone.show { display: block; }
+
+
+/* ------------------------- brand: logo + wordmark ------------------------- */
+/* Yatra One (SIL OFL 1.1, vendored) — Devanagari-styled Latin glyphs with
+   the shirorekha-inspired strokes; used only for the wordmark. */
+@font-face {
+  font-family: "Yatra One";
+  src: url("/static/vendor/yatra-one/yatra-one-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+.brand .name.indic {
+  font-family: "Yatra One", system-ui, sans-serif;
+  font-weight: 400;
+  font-size: 19px;
+  letter-spacing: .5px;
+}
+.brand .logo {
+  width: 30px; height: 30px; border-radius: 8px; object-fit: cover;
+  filter: drop-shadow(0 0 12px var(--accent-soft));
+}
