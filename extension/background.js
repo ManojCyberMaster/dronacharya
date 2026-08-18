@@ -482,7 +482,14 @@ async function handleReviewAction(tabId, msg) {
   }
   const flow = flows.get(tabId);
   if (msg.action === "cancel") { flows.delete(tabId); return; }
-  if (!flow) return;
+  if (!flow) {
+    // NEVER return silently: a missing flow means the panel outlived its
+    // state (service-worker restart, logic bug) — say so instead of eating
+    // the user's action. This class of silent swallow lost a note once.
+    return showOverlay(tabId, { phase: "error",
+      detail: "This panel lost its context (background restarted?) — "
+              + "close it and start again." });
+  }
   const cfg = await settings();
   const base = cfg.serverUrl.replace(/\/$/, "");
   if (msg.action === "upload") return startSave(tabId, false);
@@ -514,6 +521,9 @@ async function handleReviewAction(tabId, msg) {
     flows.delete(tabId);
     return showOverlay(tabId, { phase: "done", label: "✓ In your knowledge base" });
   }
+  // unknown action: make it VISIBLE (silent fallthrough is how bugs hide)
+  return showOverlay(tabId, { phase: "error",
+    detail: "Internal: unhandled action '" + msg.action + "' — please report." });
 }
 
 function badge(tabId, text, color) {
