@@ -34,6 +34,8 @@ Driven by an external four-lens review plus an adversarial code review
   `dc reembed` migration; auto-sync actually implemented.
 
 ### New
+- Web file upload with drag-and-drop (AbstractSpoon .tdl, notes, PDF,
+  Office) on the Library page.
 - `dc doctor`, `dc token`, `dc export --format obsidian`, `dc add`
   (pdf/docx/xlsx/pptx), `--local` flags, per-task provider routing with
   `[privacy]` local-only policies, extension pre-upload consent panel,

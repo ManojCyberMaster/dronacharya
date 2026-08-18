@@ -98,7 +98,7 @@ like any other change. Deleting a document removes all its knowledge.
 ## Surfaces
 
 - `dc` CLI — ask (default), save, add (local pdf/docx/xlsx/pptx), seed, tags, sync-notes, search, query, sync, export, wipe. Local files are parsed with the stdlib (no Office libraries), and answers reference the file path — search "that revenue figure" and get `~/Documents/plan.docx · Quarterly targets` back.
-- Web UI — chat with cited answers + library (`dc serve` → http://localhost:8317)
+- Web UI — chat with cited answers + library with **file upload & drag-and-drop** (AbstractSpoon `.tdl`, notes, PDF, Word/Excel/PowerPoint) (`dc serve` → http://localhost:8317)
 - Tags word map (web) — semantic map of your topics with pan/zoom, click-through browsing, editing, tag rename/delete ([docs](docs/mindmaps-graph.md))
 - Mind maps (web) — full XMind-style editor: 4 layouts (incl. hierarchical), themes, node styles/tags, per-node rich-text notes, styled cross-links, outline, focus, PNG/SVG/JSON/Markdown export; every node (and note) becomes searchable knowledge ([docs](docs/mindmaps-graph.md))
 - Knowledge graph (web) — search results as connected facts/documents/tags ([docs](docs/mindmaps-graph.md))
