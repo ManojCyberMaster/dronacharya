@@ -583,3 +583,17 @@ kbd { background: var(--panel-2); border: 1px solid var(--border);
 
 /* mind-elixir surface blends with the theme */
 .map-container { background: var(--panel) !important; }
+
+/* ------------------------------ file upload ------------------------------ */
+.dropzone {
+  display: none;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  padding: 26px;
+  margin-bottom: 14px;
+  text-align: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  pointer-events: none;      /* the document-level drop handler does the work */
+}
+.dropzone.show { display: block; }

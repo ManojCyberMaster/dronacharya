@@ -1,7 +1,8 @@
 """FastAPI app — /api/v1, stateless JSON + SSE.
 
-Auth: static bearer token from config (single-user by design).
-GET /api/v1/status and the static UI are exempt so the extension's
+Auth: static bearer token from config (the OSS AuthBackend is single-user;
+the proprietary multi-tenant service replaces this middleware at the same
+seam). GET /api/v1/status and the static UI are exempt so the extension's
 status dot and the pages themselves work before a token is entered.
 """
 
@@ -52,7 +53,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    MAX_BODY = 12 * 1024 * 1024   # rendered pages fit; nothing needs more
+    MAX_BODY = 25 * 1024 * 1024   # rendered pages + uploaded PDFs fit
 
     @app.middleware("http")
     async def hardening(request: Request, call_next):

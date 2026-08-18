@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Request, Response
+from fastapi import (APIRouter, BackgroundTasks, File, Form, Request,
+                     Response, UploadFile)
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -344,6 +346,47 @@ def graph(request: Request, body: GraphBody):
         return build_graph(repo, request.app.state.embedder,
                            request.app.state.config, body.query,
                            k=body.k, tags=body.tags)
+    finally:
+        repo.close()
+
+
+# ------------------------------------------------------------------- upload
+@router.post("/upload")
+def upload_files(request: Request, files: list[UploadFile] = File(...),
+                 tags: str = Form("")):
+    """Ingest user files (tdl/md/txt/pdf/docx/xlsx/pptx) through the web UI.
+    The file is kept under DRONACHARYA_HOME/uploads/ so its path remains a
+    stable reference (re-uploading the same name updates the document)."""
+    from ..config import home_dir
+    from ..ingest.parsers import get_parser
+    from ..ingest.pipeline import save_note_file
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    uploads_dir = home_dir() / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    repo = open_repo(request)
+    try:
+        for f in files:
+            name = Path(f.filename or "upload").name   # strip any client path
+            if get_parser(Path(name)) is None:
+                results.append({"file": name, "status": "unsupported",
+                                "message": "no parser for this file type"})
+                continue
+            target = uploads_dir / name
+            target.write_bytes(f.file.read())
+            with _COMMIT_LOCK:
+                outcome = save_note_file(repo, request.app.state.embedder,
+                                         request.app.state.config, target)
+                if (tag_list and outcome.document_id
+                        and outcome.status != "blocked"):
+                    merged = sorted(set(repo.get_tags(outcome.document_id))
+                                    | set(tag_list))
+                    repo.set_tags(outcome.document_id, merged)
+            results.append({"file": name, "status": outcome.status,
+                            "document_id": outcome.document_id,
+                            "message": outcome.message or ""})
+        return {"results": results}
     finally:
         repo.close()
 

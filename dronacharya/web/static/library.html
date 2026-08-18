@@ -12,10 +12,15 @@
     <h2>Library</h2>
     <span class="sub" id="lib-count"></span>
     <div class="spacer"></div>
+    <input id="upload-input" type="file" multiple style="display:none"
+           accept=".tdl,.md,.markdown,.txt,.pdf,.docx,.xlsx,.xlsm,.pptx">
+    <button id="upload" title="AbstractSpoon .tdl, notes, PDF, Word, Excel, PowerPoint">Upload files</button>
     <button id="refresh" class="secondary">Refresh</button>
     <button id="export" class="secondary">Export all</button>
   </div>
-  <main>
+  <main id="lib-main">
+    <div id="dropzone" class="dropzone">Drop files to add them to your
+      knowledge base (.tdl, .md, .txt, .pdf, .docx, .xlsx, .pptx)</div>
     <div class="card flat">
       <div class="row">
         <input id="filter" type="search" placeholder="Filter by title or summary…">

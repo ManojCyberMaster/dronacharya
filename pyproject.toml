@@ -27,6 +27,7 @@ server = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
     "pg8000>=1.31",            # Postgres driver (BSD, pure Python)
+    "python-multipart>=0.0.9", # file uploads (MIT)
 ]
 dev = [
     "pytest>=8.0",

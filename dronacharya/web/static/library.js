@@ -80,3 +80,56 @@ document.getElementById("export").onclick = async () => {
 window.DC.onToken = () => { loadDocs(); loadTags(); };
 
 loadDocs(); loadTags();
+
+
+// ------------------------------ file upload -------------------------------
+// AbstractSpoon .tdl, notes, PDFs, Office files — same parsers as `dc add`.
+const uploadInput = document.getElementById("upload-input");
+const dropzone = document.getElementById("dropzone");
+
+async function uploadFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  toast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+  const form = new FormData();
+  files.forEach(f => form.append("files", f));
+  let resp;
+  try {
+    resp = await fetch("/api/v1/upload", {
+      method: "POST", headers: headers(false), body: form });
+  } catch {
+    toast("Upload failed — server unreachable", "error");
+    return;
+  }
+  if (!resp.ok) {
+    toast(resp.status === 413 ? "File too large (25 MB limit)"
+          : "Upload failed (" + resp.status + ")", "error");
+    return;
+  }
+  const { results } = await resp.json();
+  results.forEach(r => {
+    const good = ["created", "updated", "unchanged"].includes(r.status);
+    toast(`${r.file}: ${r.status}${r.message && !good ? " — " + r.message : ""}`,
+          good ? "ok" : "error");
+  });
+  loadDocs(); loadTags();
+}
+
+document.getElementById("upload").onclick = () => uploadInput.click();
+uploadInput.onchange = () => { uploadFiles(uploadInput.files); uploadInput.value = ""; };
+
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => {
+  if ([...(e.dataTransfer?.types || [])].includes("Files")) {
+    dragDepth++; dropzone.classList.add("show");
+  }
+});
+document.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; dropzone.classList.remove("show"); }
+});
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0; dropzone.classList.remove("show");
+  if (e.dataTransfer?.files?.length) uploadFiles(e.dataTransfer.files);
+});
