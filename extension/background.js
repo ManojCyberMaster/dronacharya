@@ -457,10 +457,9 @@ async function pollForReview(tabId) {
 }
 
 async function handleReviewAction(tabId, msg) {
-  const flow = flows.get(tabId);
-  if (!flow) return;
-  const cfg = await settings();
-  const base = cfg.serverUrl.replace(/\/$/, "");
+  // NOTE: note-save and cancel must run BEFORE the flow guard — the note
+  // overlay has no per-tab save flow, and the guard silently swallowed the
+  // save (overlay stuck on "Saving note…", note never created).
   if (msg.action === "note-save") {
     const cfg = await settings();
     let resp;
@@ -481,9 +480,13 @@ async function handleReviewAction(tabId, msg) {
     return showOverlay(tabId, { phase: "done",
       label: "✓ Noted: " + (out.title || "saved") });
   }
+  const flow = flows.get(tabId);
+  if (msg.action === "cancel") { flows.delete(tabId); return; }
+  if (!flow) return;
+  const cfg = await settings();
+  const base = cfg.serverUrl.replace(/\/$/, "");
   if (msg.action === "upload") return startSave(tabId, false);
   if (msg.action === "overwrite") return startSave(tabId, true);
-  if (msg.action === "cancel") { flows.delete(tabId); return; }
   if (msg.action === "discard") {
     if (flow.docId)
       await fetch(base + "/api/v1/documents/" + flow.docId,
