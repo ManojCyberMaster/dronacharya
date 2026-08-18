@@ -64,6 +64,29 @@ class SyncReport:
     deleted: int = 0
 
 
+_AUTO_SYNC_KEY = "__auto_sync_ts__"
+
+
+def maybe_auto_sync(repo, config: Config, *, quiet: bool = True) -> "SyncReport | None":
+    """Opportunistic reconcile implementing [sync] auto / interval_seconds:
+    called by CLI commands after KB-touching work. Rate-limited via a
+    timestamp in sync_state; never raises (offline is normal, not an error)."""
+    import time
+
+    if (not config.sync.auto or config.deployment.role != "client"
+            or not config.server.remote_url):
+        return None
+    state = repo.get_sync_state(_AUTO_SYNC_KEY)
+    now = time.time()
+    if state and now - state[0] < config.sync.interval_seconds:
+        return None
+    repo.set_sync_state(_AUTO_SYNC_KEY, now, "auto")
+    try:
+        return sync_once(repo, config)
+    except Exception:  # noqa: BLE001 — offline/unreachable: try again next interval
+        return None
+
+
 def sync_once(repo, config: Config) -> SyncReport:
     device_id = get_self_device_id(repo)
     last_push, last_pull = repo.device_state(device_id)
@@ -85,8 +108,12 @@ def sync_once(repo, config: Config) -> SyncReport:
     # 2. pull
     resp = _request(config, "GET",
                     f"/api/v1/sync/pull?device_id={device_id}&since={last_pull}")
-    summary = apply_ops(repo, resp.get("ops", []), origin="remote:server",
-                        prefer_local_on_tie=False, pending_ids=pending_ids)
+    from ..embeddings import get_embedder
+
+    pulled_ops = resp.get("ops", [])
+    summary = apply_ops(repo, pulled_ops, origin="remote:server",
+                        prefer_local_on_tie=False, pending_ids=pending_ids,
+                        embedder=get_embedder(config) if pulled_ops else None)
     report.pulled = summary["applied"]
     report.conflicts = summary["conflicts"]
     report.deleted = summary["deleted"]

@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     ".[server]"
 
+RUN useradd --create-home --uid 10001 dronacharya \
+    && mkdir -p /data && chown dronacharya:dronacharya /data
+USER dronacharya
+
 ENV DRONACHARYA_HOME=/data
 VOLUME /data
 EXPOSE 8317

@@ -214,7 +214,12 @@
     if (!resp.ok) { toast("Could not load the document", "error"); return; }
     const doc = await resp.json();
     const changed = () => opts.onChange && opts.onChange();
-    const isMap = doc.source_type === "mindmap";
+    // server-declared capabilities; fall back for pre-capabilities servers
+    const caps = doc.capabilities
+      || { editable_units: doc.source_type !== "mindmap",
+           editor: doc.source_type === "mindmap" ? "mindmap" : null };
+    const isMap = caps.editor === "mindmap";
+    const ownedElsewhere = !caps.editable_units;
 
     const wrap = document.createElement("div");
     const origin = doc.url || doc.file_path || "";
@@ -290,11 +295,13 @@
 
     // units
     const unitsEl = wrap.querySelector("#dv-units");
-    const editable = !isMap;
+    const editable = !ownedElsewhere;
     if (!editable) {
+      const page = caps.editor === "todo" ? "/todos" : "/" + caps.editor;
+      const what = caps.editor === "todo" ? "the To-dos page" : "the mind-map editor";
       unitsEl.innerHTML = `<div class="muted" style="margin-bottom:10px">
-        This knowledge comes from a mind map — edit it (nodes, notes and tags)
-        in the <a href="/mindmap" style="color:var(--accent)">mind-map editor</a>;
+        This knowledge is owned by its own editor — change it in
+        <a href="${page}" style="color:var(--accent)">${what}</a>;
         every change re-enters the corpus automatically.</div>`;
     }
     async function putUnits() {

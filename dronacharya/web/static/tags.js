@@ -194,7 +194,7 @@ async function tagModal(name, count) {
   const { documents } = await resp.json();
   body.innerHTML = "";
   documents.forEach(d => {
-    const isMap = d.source_type === "mindmap";
+    const isMap = (d.capabilities?.editor || d.source_type) === "mindmap";
     const nodePaths = isMap && d.tag_nodes && d.tag_nodes[name] || null;
     const row = document.createElement("div");
     row.className = "unit";

@@ -47,13 +47,13 @@ def from_html(html: str, url: str | None = None, title_hint: str = "") -> Extrac
                      lang=_detect_lang(text))
 
 
-def from_url(url: str) -> Extracted | None:
+def from_url(url: str, allow_private: bool = True) -> Extracted | None:
     """Server-side fetch of exactly one URL (CLI saves). Never follows links.
     Uses the shared polite fetcher (browser headers, curl fallback, per-host
     throttle) instead of trafilatura's — same anti-bot behavior everywhere."""
     from .fetch import fetch_page
 
-    downloaded, _err = fetch_page(url)
+    downloaded, _err = fetch_page(url, allow_private=allow_private)
     if not downloaded:
         return None
     return from_html(downloaded, url=url)

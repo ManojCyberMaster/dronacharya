@@ -12,6 +12,32 @@ MAX_UNITS_PER_DOC = 2
 RERANK_POOL = 30
 
 
+def result_to_json(r) -> dict:
+    """One wire/display shape for a search hit — used identically by the
+    HTTP API and the local CLI path so clients render one format."""
+    from .models import doc_capabilities
+
+    return {
+        "document_id": r.document.id,
+        "title": r.document.title,
+        "source_type": r.document.source_type,
+        "url": r.document.url,
+        "file_path": r.document.file_path,
+        "heading_path": r.unit.heading_path,
+        "kind": r.unit.kind,
+        "text": r.unit.text,
+        "score": r.score,
+        "capabilities": doc_capabilities(r.document.source_type),
+    }
+
+
+def confidence_gate(config, reranker) -> float:
+    """The threshold matching the score scale actually in use (see
+    RetrievalConfig: reranked probabilities vs raw RRF sums)."""
+    return (config.retrieval.min_relevance if reranker is not None
+            else config.retrieval.min_confidence)
+
+
 def hybrid_search(
     repo, embedder: Embedder, query: str, *, top_k: int = 8, candidates: int = 50,
     reranker=None, tags: list[str] | None = None,

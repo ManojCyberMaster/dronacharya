@@ -2,8 +2,13 @@
 
 Rules (explicit, never silent):
   - deletions always win (data-deletion guarantee across devices)
-  - knowledge content: last-write-wins by updated_at; the losing version is
+  - knowledge content: the higher per-document VERSION counter wins (a
+    logical clock — immune to wall-clock skew between devices); equal
+    versions fall back to updated_at with a tie guard. The losing version is
     recorded in sync_conflicts (restorable), never dropped silently
+  - embeddings never travel: sync ships text + metadata only, the receiving
+    node re-embeds with ITS model (peers may run different embedding models;
+    payloads stay small enough for thin/mobile clients)
   - tags: union of both sides
   - near-tie (< 2s) clock guard: the preferred side wins (server prefers its
     local copy; a client applying server ops prefers the incoming/server copy)
@@ -39,25 +44,45 @@ def _newer(a: str, b: str, prefer_first_on_tie: bool) -> bool:
     return delta > 0
 
 
+def _doc_wins(incoming, local, prefer_incoming_on_tie: bool) -> bool:
+    """Version counter first (logical clock, clock-skew immune), wall time
+    only to break version ties."""
+    if incoming.version != local.version:
+        return incoming.version > local.version
+    return _newer(incoming.updated_at, local.updated_at, prefer_incoming_on_tie)
+
+
 def _doc_from_payload(data: dict) -> Document:
     fields = {k: v for k, v in data.items() if k in Document.__dataclass_fields__}
     return Document(**fields)
 
 
 def _units_from_payload(units: list[dict]) -> tuple[list[KnowledgeUnit], list[list[float]]]:
+    import math
+
+    from ..config import EMBEDDING_DIM
+
     out_units, out_embs = [], []
     for u in units:
         fields = {k: v for k, v in u.items()
                   if k in KnowledgeUnit.__dataclass_fields__}
         out_units.append(KnowledgeUnit(**fields))
-        out_embs.append(u.get("embedding") or [])
+        emb = u.get("embedding") or []
+        # never index a malformed vector from a sync peer: wrong dimension or
+        # non-finite floats corrupt nearest-neighbor search for everything
+        if emb and (len(emb) != EMBEDDING_DIM
+                    or not all(isinstance(x, (int, float)) and math.isfinite(x)
+                               for x in emb)):
+            emb = []
+        out_embs.append(emb)
     return out_units, out_embs
 
 
 def collect_ops(repo, since_seq: int, *, local_only: bool = False,
                 exclude_origin: str | None = None) -> tuple[list[dict], int]:
     """Assemble sync ops from the oplog: one op per document, latest state wins.
-    Returns (ops, latest_seq_covered)."""
+    Returns (ops, latest_seq_covered). Embeddings are STRIPPED from the
+    payload — they are derived artifacts, rebuilt by the receiver."""
     rows = repo.oplog_since(since_seq, local_only=local_only,
                             exclude_origin=exclude_origin)
     latest = since_seq
@@ -76,13 +101,16 @@ def collect_ops(repo, since_seq: int, *, local_only: bool = False,
         else:
             bundle = repo.get_bundle(entity_id)
             if bundle is not None:
+                for u in bundle.get("units", []):
+                    u.pop("embedding", None)
                 ops.append({"op": "upsert", **bundle})
     return ops, latest
 
 
 def apply_ops(repo, ops: Iterable[dict], *, origin: str,
               prefer_local_on_tie: bool,
-              pending_ids: set[str] | None = None) -> dict:
+              pending_ids: set[str] | None = None,
+              embedder=None) -> dict:
     """Apply remote ops to a repo. Returns summary counts.
 
     pending_ids: document ids with local changes not yet pushed. When given
@@ -106,6 +134,9 @@ def apply_ops(repo, ops: Iterable[dict], *, origin: str,
 
             incoming = _doc_from_payload(op["doc"])
             units, embeddings = _units_from_payload(op["units"])
+            if units and not any(embeddings) and embedder is not None:
+                # modern peers ship no vectors — derive them locally
+                embeddings = embedder.embed_passages([u.text for u in units])
             incoming_tags = op.get("tags") or []
 
             # deletions always win
@@ -145,7 +176,7 @@ def apply_ops(repo, ops: Iterable[dict], *, origin: str,
                 continue
 
             divergent = pending_ids is None or incoming.id in pending_ids
-            if _newer(incoming.updated_at, local.updated_at, not prefer_local_on_tie):
+            if _doc_wins(incoming, local, not prefer_local_on_tie):
                 if divergent:
                     repo.record_conflict(local.id, repo.get_bundle(local.id) or {},
                                          "content_lww")

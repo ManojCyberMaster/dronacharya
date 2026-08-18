@@ -29,7 +29,7 @@ function docCard(d) {
                           style="color:var(--accent)">${esc(origin)}</a>` : esc(origin);
   card.innerHTML = `
     <div class="row">
-      <span class="doc-title">${d.source_type === "mindmap" ? "MindMap: " : ""}${esc(d.title)}</span>
+      <span class="doc-title">${(d.capabilities?.editor || d.source_type) === "mindmap" ? "MindMap: " : ""}${esc(d.title)}</span>
       <span class="badge plain">${esc(d.source_type)}</span>
       ${d.distilled ? "" : '<span class="badge warn" title="fallback excerpts — run dc redistill">undistilled</span>'}
       <div class="doc-actions">

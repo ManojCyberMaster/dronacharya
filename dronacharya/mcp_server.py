@@ -10,15 +10,16 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from .config import db_path, load_config
+from .config import load_config
 
 mcp = FastMCP("dronacharya")
 
 
 def _repo():
-    from .storage.sqlite import SqliteRepo
+    from .config import load_config
+    from .storage import get_repo
 
-    return SqliteRepo(db_path())
+    return get_repo(load_config())   # sqlite or postgres, per config
 
 
 def _embedder():
@@ -76,6 +77,15 @@ def get_document(document_id: str) -> dict:
 
 @mcp.tool()
 def save_url(url: str, tags: list[str] | None = None, note: str | None = None) -> dict:
+    """Save one web page into the knowledge base. Write access is opt-in:
+    set DRONACHARYA_MCP_WRITE=1 when registering the server — a read-only
+    default keeps a compromised/agentic client from polluting the KB."""
+    import os
+
+    if os.environ.get("DRONACHARYA_MCP_WRITE") != "1":
+        return {"status": "read_only",
+                "message": "writes disabled — register the MCP server with "
+                           "DRONACHARYA_MCP_WRITE=1 to allow save_url"}
     """Save one web page's knowledge to the user's knowledge base (only that
     page is fetched — links are never crawled). Distillation may take a while
     if an LLM provider is configured."""

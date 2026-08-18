@@ -27,7 +27,7 @@ MAX_LABEL = 100
 
 
 def _cos(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))  # embeddings are L2-normalized
+    return sum(x * y for x, y in zip(a, b, strict=False))  # embeddings are L2-normalized
 
 
 def build_graph(repo, embedder: Embedder, config: Config, query: str, *,

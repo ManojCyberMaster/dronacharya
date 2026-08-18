@@ -35,11 +35,16 @@ class CrossEncoderReranker:
                top_k: int) -> list[SearchResult]:
         if not results:
             return results
+        import math
+
         scores = self._load().predict([(query, r.unit.text) for r in results])
-        ranked = sorted(zip(results, scores), key=lambda pair: pair[1], reverse=True)
+        ranked = sorted(zip(results, scores, strict=False), key=lambda pair: pair[1], reverse=True)
         out = []
         for result, score in ranked[:top_k]:
-            result.score = float(score)
+            # sigmoid-normalize the raw logit: scores become comparable
+            # probabilities in (0, 1) on every machine, and min_relevance
+            # can be one calibrated number instead of a raw-logit guess
+            result.score = 1.0 / (1.0 + math.exp(-float(score)))
             out.append(result)
         return out
 

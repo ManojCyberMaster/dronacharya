@@ -1,10 +1,14 @@
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { serverUrl: "http://127.0.0.1:8317", token: "", alwaysOverwrite: false };
+const DEFAULTS = { serverUrl: "http://127.0.0.1:8317", token: "",
+                   alwaysOverwrite: false, reviewUpload: null };
 let page = null;
 let currentTabId = null;
 
 async function settings() {
-  return { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+  const cfg = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+  if (cfg.reviewUpload === null)
+    cfg.reviewUpload = !/^https?:\/\/(127\.0\.0\.1|localhost)([:/]|$)/.test(cfg.serverUrl);
+  return cfg;
 }
 
 function apiHeaders(cfg, json = true) {
@@ -19,6 +23,7 @@ async function init() {
   $("serverUrl").value = cfg.serverUrl;
   $("token").value = cfg.token;
   $("alwaysOverwrite").checked = cfg.alwaysOverwrite;
+  $("reviewUpload").checked = !!cfg.reviewUpload;
 
   // status dot (unauthenticated endpoint)
   try {
@@ -108,6 +113,7 @@ $("saveSettings").onclick = async () => {
   await chrome.storage.local.set({
     serverUrl, token: $("token").value.trim(),
     alwaysOverwrite: $("alwaysOverwrite").checked,
+    reviewUpload: $("reviewUpload").checked,
   });
   init();
 };

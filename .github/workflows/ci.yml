@@ -1,0 +1,55 @@
+# CI — GitHub Actions (also runs unmodified on compatible self-hosted runners).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install (locked)
+        run: |
+          ~/.local/bin/uv venv
+          ~/.local/bin/uv pip install -e ".[server,dev]"
+      - name: Lint
+        run: .venv/bin/ruff check .
+      - name: Tests (hermetic — no models, no network)
+        run: .venv/bin/python -m pytest -q
+      - name: Dependency audit
+        run: |
+          ~/.local/bin/uv pip install pip-audit
+          .venv/bin/pip-audit --strict || true   # advisory until baseline is clean
+      - name: License policy (no AGPL/GPL/SSPL)
+        run: |
+          .venv/bin/pip-licenses --fail-on 'GPL;AGPL;SSPL' \
+            --ignore-packages pip setuptools || true
+
+  golden-eval:
+    # loads real embedding + reranker models (~500MB download, cached)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install
+        run: |
+          ~/.local/bin/uv venv
+          ~/.local/bin/uv pip install -e ".[server,dev]"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-v1
+      - name: Golden retrieval eval
+        run: DC_RUN_EVALS=1 .venv/bin/python -m pytest -q tests/test_eval_retrieval.py

@@ -3,10 +3,14 @@
 // chrome.scripting on the active tab — no content scripts run on every page,
 // no data leaves the browser except to the user's own configured server.
 
-const DEFAULTS = { serverUrl: "http://127.0.0.1:8317", token: "", alwaysOverwrite: false };
+const DEFAULTS = { serverUrl: "http://127.0.0.1:8317", token: "",
+                   alwaysOverwrite: false, reviewUpload: null };
 
 async function settings() {
-  return { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+  const cfg = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+  if (cfg.reviewUpload === null)   // default: confirm before sending anywhere
+    cfg.reviewUpload = !/^https?:\/\/(127\.0\.0\.1|localhost)([:/]|$)/.test(cfg.serverUrl);
+  return cfg;
 }
 
 function apiHeaders(cfg, json = true) {
@@ -185,6 +189,19 @@ function dcOverlayMain() {
                        units: kept.length ? kept : units });
         render({ phase: "progress", label: "Saving…", pct: 80 });
       }));
+    } else if (msg.phase === "confirm") {
+      head.innerHTML = `<b>Send this page to your knowledge base?</b>`;
+      body.innerHTML = `<div><b>${esc(msg.title || "(untitled)")}</b></div>
+        <div class="muted" style="overflow-wrap:anywhere">${esc(msg.url || "")}</div>
+        <div class="muted" style="margin-top:8px">The rendered page content
+        (${esc(msg.sizeKb)} KB — including anything visible behind your login)
+        will be sent to <b>${esc(msg.dest)}</b> for distillation. Raw HTML is
+        not stored; distilled knowledge is.</div>`;
+      foot.appendChild(button("ghostb", "Cancel", () => { send("cancel"); close(); }));
+      foot.appendChild(button("", "Send & save", () => {
+        send("upload");
+        render({ phase: "progress", label: "Distilling knowledge…", pct: 4 });
+      }));
     } else if (msg.phase === "consent") {
       head.innerHTML = `<b>Page changed since you saved it</b>`;
       body.innerHTML = `<pre class="diff">Saved: ${esc(msg.old || "—")}\nNow:   ${esc(msg.now || "—")}</pre>
@@ -244,6 +261,15 @@ async function runSaveFlow(tabId, options = {}) {
     };
   }
   flows.set(tabId, { page, options });
+  const cfg = await settings();
+  if (cfg.reviewUpload) {
+    // informed consent BEFORE anything leaves the browser (C3): what page,
+    // how much data, and where it goes
+    return showOverlay(tabId, { phase: "confirm",
+      title: page.title, url: page.url,
+      sizeKb: Math.max(1, Math.round(page.html.length / 1024)),
+      dest: cfg.serverUrl.replace(/^https?:\/\//, "") });
+  }
   await startSave(tabId, false);
 }
 
@@ -294,9 +320,15 @@ async function pollForReview(tabId) {
           detail: "The server failed to save this page: " +
                   (body.error || "unknown error") + " — try saving again." });
       }
+      if (r.status === 202) continue;                 // server says: still distilling
       if (!r.ok) continue;
       const doc = await r.json();
-      if (!doc.distilled && i < MAX - 1) continue;
+      // pending=true means an overwrite re-distill is running and the doc on
+      // disk is STALE — reviewing it would show old content and the user's
+      // edits would be clobbered when the new version lands. Wait it out.
+      // A committed extractive save (distilled=false, pending=false) is FINAL:
+      // review it immediately instead of burning the whole poll budget.
+      if (doc.pending && i < MAX - 1) continue;
       const full = await (await fetch(base + "/api/v1/documents/" + doc.id,
         { headers: apiHeaders(cfg, false) })).json();
       flow.docId = doc.id;
@@ -315,6 +347,7 @@ async function handleReviewAction(tabId, msg) {
   if (!flow) return;
   const cfg = await settings();
   const base = cfg.serverUrl.replace(/\/$/, "");
+  if (msg.action === "upload") return startSave(tabId, false);
   if (msg.action === "overwrite") return startSave(tabId, true);
   if (msg.action === "cancel") { flows.delete(tabId); return; }
   if (msg.action === "discard") {
@@ -326,7 +359,8 @@ async function handleReviewAction(tabId, msg) {
   }
   if (msg.action === "keep") {
     try {
-      if (flow.docId && msg.summary && msg.summary !== flow.summary)
+      if (flow.docId && typeof msg.summary === "string"
+          && msg.summary !== flow.summary)   // empty = deliberate clearing
         await fetch(base + "/api/v1/documents/" + flow.docId, {
           method: "PATCH", headers: apiHeaders(cfg),
           body: JSON.stringify({ summary: msg.summary }),

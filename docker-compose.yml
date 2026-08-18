@@ -10,7 +10,9 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: dronacharya
-      POSTGRES_PASSWORD: dronacharya   # local network only; change if exposed
+      # override with POSTGRES_PASSWORD=... in a .env file; keep the DSN in
+      # server-data/config.toml in sync
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dronacharya}
       POSTGRES_DB: dronacharya
     volumes:
       - pgdata:/var/lib/postgresql/data

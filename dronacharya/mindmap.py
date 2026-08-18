@@ -34,11 +34,13 @@ _ENTITIES = {"&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">",
 
 
 def note_text(html: str) -> str:
-    """Rich-text note HTML → plain text (notes are text-only by design)."""
+    """Rich-text note HTML → plain text (notes are text-only by design).
+    Tags are stripped FIRST, then entities decoded exactly once with the
+    stdlib — a hand-rolled entity loop double-decoded &amp;lt; into <."""
+    import html as html_mod
+
     text = _HTML_TAG.sub(" ", str(html or ""))
-    for ent, ch in _ENTITIES.items():
-        text = text.replace(ent, ch)
-    return " ".join(text.split())
+    return " ".join(html_mod.unescape(text).split())
 
 
 def _walk(node: dict, path: list[str], out: list[tuple[str, str]],

@@ -17,6 +17,7 @@ from ..guardrails.pii import apply_pii_policy
 from ..guardrails.policy import get_policy
 from ..models import Document, KnowledgeUnit, SaveOutcome, UnitKind
 from . import extract as extract_mod
+from .fetch import allow_private_urls
 from .distill import get_distiller
 from .parsers import get_parser
 
@@ -62,7 +63,7 @@ def preview_web(
     elif config.extraction.primary == "firecrawl" and config.extraction.firecrawl_api_key:
         extracted = extract_mod.from_firecrawl(url, config.extraction.firecrawl_api_key)
     else:
-        extracted = extract_mod.from_url(url)
+        extracted = extract_mod.from_url(url, allow_private=allow_private_urls(config))
     if extracted is None:
         return "blocked", None, None, ""
     text, block_reason = _guard(repo, config, extracted.text, extracted.title)
@@ -90,7 +91,7 @@ def save_web(
     elif config.extraction.primary == "firecrawl" and config.extraction.firecrawl_api_key:
         extracted = extract_mod.from_firecrawl(url, config.extraction.firecrawl_api_key)
     else:
-        extracted = extract_mod.from_url(url)
+        extracted = extract_mod.from_url(url, allow_private=allow_private_urls(config))
     if extracted is None:
         return SaveOutcome(status="blocked", message="could not extract readable content")
 
@@ -161,7 +162,7 @@ def redistill_document(repo, embedder: Embedder, config: Config, document_id: st
             break
     text = None
     if doc.url:
-        extracted = extract_mod.from_url(doc.url)
+        extracted = extract_mod.from_url(doc.url, allow_private=allow_private_urls(config))
         if extracted:
             text = extracted.text
     if text is None:

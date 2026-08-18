@@ -56,9 +56,13 @@ class EmbeddingsConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     top_k: int = 8
     candidates: int = 50
-    rerank: str = "auto"
+    rerank: str = "on"    # on (CPU is fine) | auto (only with CUDA) | off
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    min_confidence: float = 0.015
+    # TWO score scales, TWO thresholds — never compare across scales:
+    # reranked scores are sigmoid probabilities (0..1); without a reranker
+    # the RRF fusion scores are rank-based and barely mean anything.
+    min_relevance: float = 0.30      # gate when the reranker is active
+    min_confidence: float = 0.015    # gate for raw RRF scores (rerank=off)
     dup_threshold: float = 0.90
 
 
@@ -66,6 +70,9 @@ class LLMConfig(BaseModel):
     provider_order: list[str] = Field(
         default_factory=lambda: ["anthropic", "openai"]
     )
+    # task routing: distillation is context-grounded extraction — a small
+    # local model does it well and cheaply; empty = use provider_order
+    distill_providers: list[str] = Field(default_factory=list)
     anthropic_model: str = "claude-opus-5"
     openai_model: str = "gpt-4o"
     ollama_url: str = ""      # e.g. http://localhost:11434/v1 (optional)
@@ -88,9 +95,22 @@ class ExtractionConfig(BaseModel):
     firecrawl_api_key: str = ""
 
 
+class PrivacyConfig(BaseModel):
+    """Per-task egress policy. "any" = every configured provider (listing a
+    cloud provider in provider_order is the consent). "local-only" = the
+    task's chain keeps only self-hosted endpoints (ollama/vllm) — page text
+    and questions can then never reach a cloud API, even on local failure."""
+
+    distill: str = "any"    # any | local-only
+    answer: str = "any"     # any | local-only  (chat, quick answers, --deeper)
+
+
 class GuardrailsConfig(BaseModel):
     pii_mode: str = "redact"  # redact | block | off
     policy: str = "basic"
+    # SSRF policy for server-side fetches: auto = private/LAN targets are
+    # allowed on personal machines but blocked in server role | always | never
+    allow_private_urls: str = "auto"
 
 
 class SyncConfig(BaseModel):
@@ -108,6 +128,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
+    privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
 
@@ -158,9 +179,10 @@ model = ""                   # advanced: override the preset model (requires `dc
 
 [retrieval]
 top_k = 8
-rerank = "auto"               # auto = on when a CUDA GPU is present | on | off
+rerank = "on"                 # on (works on CPU) | auto (CUDA only) | off
 rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-min_confidence = 0.015
+min_relevance = 0.30          # reranked scores are probabilities (0..1)
+min_confidence = 0.015        # raw fusion scores, only used when rerank = "off"
 dup_threshold = 0.90
 
 [llm]
@@ -175,6 +197,13 @@ ollama_url = ""              # e.g. "http://localhost:11434/v1"
 ollama_model = ""
 vllm_url = ""                # e.g. "http://dgx.local:8000/v1" or a rented GPU endpoint
 vllm_model = ""
+distill_providers = []       # e.g. ["ollama"] — small local model for distillation
+
+[privacy]
+# Per-task egress policy: "any" (default) or "local-only" (only your own
+# ollama/vllm endpoints — content can never reach a cloud API for that task)
+distill = "any"
+answer = "any"
 
 [websearch]
 searx_url = ""               # your own SearxNG for grounded `dc ask` fallback
@@ -187,6 +216,7 @@ firecrawl_api_key = ""
 [guardrails]
 pii_mode = "redact"          # redact | block | off
 policy = "basic"
+allow_private_urls = "auto"  # auto (blocked in server role) | always | never
 
 [sync]
 auto = true

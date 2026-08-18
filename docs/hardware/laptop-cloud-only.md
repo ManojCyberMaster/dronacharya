@@ -1,4 +1,7 @@
-# Laptop, no GPU — cloud LLMs only
+# Laptop, no GPU — cloud generation, local retrieval
+
+Generation runs on a cloud API you configure; capture, embeddings, search,
+and reranking stay entirely on your machine.
 
 Full functionality with zero local model hosting. Works on macOS, Linux,
 Windows, and WSL.

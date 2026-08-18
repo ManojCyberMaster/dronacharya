@@ -65,14 +65,16 @@ def query(
 ) -> QueryResult:
     from .reranker import get_reranker
 
+    reranker = get_reranker(config)
     sources = hybrid_search(
         repo, embedder, question,
         top_k=top_k or config.retrieval.top_k,
         candidates=config.retrieval.candidates,
-        reranker=get_reranker(config),
+        reranker=reranker,
         tags=tags,
     )
-    confident = bool(sources) and sources[0].score >= config.retrieval.min_confidence
+    from .search import confidence_gate
+    confident = bool(sources) and sources[0].score >= confidence_gate(config, reranker)
     chain = get_provider_chain(config)
 
     if mode == "kb" and not confident:

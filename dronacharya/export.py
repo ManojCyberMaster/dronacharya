@@ -40,6 +40,11 @@ def export_zip(repo) -> bytes:
             zf.writestr(f"markdown/{safe or doc.id}.md", "\n".join(lines))
 
         zf.writestr("documents.json", json.dumps(docs_json, indent=2, ensure_ascii=False))
+        # operational data holds user traces too (questions, URLs, conflict
+        # payloads) — "full export" without it would be a false claim
+        zf.writestr("operational.json",
+                    json.dumps(repo.dump_operational(), indent=2,
+                               ensure_ascii=False, default=str))
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
     return buf.getvalue()
 
@@ -47,3 +52,36 @@ def export_zip(repo) -> bytes:
 def export_to_file(repo, path: Path) -> Path:
     path.write_bytes(export_zip(repo))
     return path
+
+
+def export_markdown_dir(repo, out_dir: Path) -> int:
+    """Obsidian-ready vault export: one Markdown file per document with YAML
+    frontmatter (tags, source, dates). Point Obsidian at the folder or merge
+    it into an existing vault."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for doc, units in repo.iter_documents_with_units():
+        tags = repo.get_tags(doc.id)
+        fm = ["---", f'title: "{(doc.title or "").replace(chr(34), chr(39))}"']
+        if tags:
+            fm.append("tags:")
+            fm += [f"  - {t.replace(' ', '_')}" for t in tags]
+        if doc.url:
+            fm.append(f"source: {doc.url}")
+        if doc.file_path:
+            fm.append(f'file: "{doc.file_path}"')
+        fm += [f"created: {doc.created_at[:10]}", "---", ""]
+        lines = fm
+        if doc.summary:
+            lines += [f"> {doc.summary}", ""]
+        for u in units:
+            if u.heading_path:
+                lines.append(f"## {u.heading_path}")
+            lines += [u.text, ""]
+        if doc.url:
+            lines.append(f"[source]({doc.url})")
+        safe = "".join(c if c.isalnum() or c in "-_ " else "_"
+                       for c in (doc.title or doc.id))[:80].strip() or doc.id
+        (out_dir / f"{safe}.md").write_text("\n".join(lines), encoding="utf-8")
+        n += 1
+    return n

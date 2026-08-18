@@ -1,4 +1,9 @@
-# Remote GPU endpoint (your own box elsewhere, or a rented GPU service)
+# Remote GPU endpoint
+
+> **Transport warning:** the examples use plain HTTP, which is only
+> acceptable inside a network you fully trust (LAN, VPN, WireGuard,
+> Tailscale). Over the public internet, put TLS in front of the endpoint —
+> prompts and page content transit this link. (your own box elsewhere, or a rented GPU service)
 
 Anything that speaks the OpenAI-compatible API works — vLLM, Ollama, LM Studio,
 llama.cpp server, or a rented GPU service endpoint you control.

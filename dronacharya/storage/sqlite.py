@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Iterable
 
 from ..config import EMBEDDING_DIM
-from ..models import LOCAL_TENANT, Document, KnowledgeUnit, new_id, utcnow
+from ..models import LOCAL_TENANT, Document, KnowledgeUnit, utcnow
 
 SCHEMA_VERSION = 1
 
-_DDL = f"""
+_DDL = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS documents (
   distilled INTEGER NOT NULL DEFAULT 0,
   distill_tier TEXT, lang TEXT,
   version INTEGER NOT NULL DEFAULT 1,
-  origin_device TEXT, meta TEXT NOT NULL DEFAULT '{{}}',
+  origin_device TEXT, meta TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_url  ON documents(tenant_id, url)  WHERE url IS NOT NULL;
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS document_tags (
 
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY, tenant_id TEXT NOT NULL,
-  type TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{{}}', created_at TEXT NOT NULL
+  type TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS oplog (
@@ -101,7 +101,30 @@ CREATE TABLE IF NOT EXISTS sync_state (
   file_path TEXT PRIMARY KEY, mtime REAL NOT NULL,
   content_hash TEXT NOT NULL, last_synced TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS kb_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL,
+  created_at TEXT NOT NULL, last_used TEXT, revoked INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, key TEXT NOT NULL,
+  payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_key ON jobs (kind, key, id);
 """
+
+
+def _dt_ago_hours(hours: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
 def _serialize_f32(vec: list[float]) -> bytes:
@@ -227,10 +250,12 @@ class SqliteRepo:
                 "INSERT INTO units_fts (rowid, text, title) VALUES (?,?,?)",
                 (rid, unit.text, doc.title),
             )
-            cur.execute(
-                "INSERT INTO units_vec (rowid, embedding) VALUES (?,?)",
-                (rid, _serialize_f32(emb)),
-            )
+            if emb:   # vector-less unit (peer shipped none, no embedder yet):
+                      # FTS still finds it; `dc reembed` adds the vector later
+                cur.execute(
+                    "INSERT INTO units_vec (rowid, embedding) VALUES (?,?)",
+                    (rid, _serialize_f32(emb)),
+                )
 
     def _delete_units(self, cur: sqlite3.Cursor, document_id: str) -> None:
         rids = [r[0] for r in cur.execute(
@@ -463,8 +488,122 @@ class SqliteRepo:
         )
         self.conn.commit()
 
+
+
+    # ----------------------------------------------------------------- kb meta
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM kb_meta WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO kb_meta (key, value) VALUES (?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+        self.conn.commit()
+
+    # -------------------------------------------------------------- api tokens
+    def create_token(self, name: str, scopes: list[str]) -> tuple[int, str]:
+        """Returns (id, plaintext). Only the sha256 hash is stored — the
+        plaintext is shown exactly once."""
+        import hashlib
+        import secrets
+
+        plaintext = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(plaintext.encode()).hexdigest()
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO api_tokens (name, token_hash, scopes, created_at)"
+            " VALUES (?,?,?,?)",
+            (name, digest, ",".join(sorted(set(scopes))), utcnow()))
+        self.conn.commit()
+        return cur.lastrowid, plaintext
+
+    def list_tokens(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, name, scopes, created_at, last_used, revoked"
+            " FROM api_tokens ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def revoke_token(self, token_id: int) -> bool:
+        cur = self.conn.execute(
+            "UPDATE api_tokens SET revoked=1 WHERE id=?", (token_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def verify_token(self, plaintext: str) -> list[str] | None:
+        import hashlib
+
+        digest = hashlib.sha256(plaintext.encode()).hexdigest()
+        row = self.conn.execute(
+            "SELECT id, scopes FROM api_tokens WHERE token_hash=? AND revoked=0",
+            (digest,)).fetchone()
+        if row is None:
+            return None
+        self.conn.execute("UPDATE api_tokens SET last_used=? WHERE id=?",
+                          (utcnow(), row["id"]))
+        self.conn.commit()
+        return row["scopes"].split(",") if row["scopes"] else []
+
+    # ------------------------------------------------------------ durable jobs
+    def enqueue_job(self, kind: str, key: str, payload: dict) -> int:
+        import json as json_mod
+
+        cur = self.conn.cursor()
+        now = utcnow()
+        cur.execute("DELETE FROM jobs WHERE status = 'done' AND updated_at < ?",
+                    ((_dt_ago_hours(24)),))
+        cur.execute(
+            "INSERT INTO jobs (kind, key, payload, status, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (kind, key, json_mod.dumps(payload), "queued", now, now))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def claim_next_job(self) -> dict | None:
+        import json as json_mod
+
+        cur = self.conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        row = cur.execute(
+            "SELECT id, kind, key, payload FROM jobs WHERE status='queued'"
+            " ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            self.conn.commit()
+            return None
+        cur.execute("UPDATE jobs SET status='running', updated_at=? WHERE id=?",
+                    (utcnow(), row["id"]))
+        self.conn.commit()
+        return {"id": row["id"], "kind": row["kind"], "key": row["key"],
+                "payload": json_mod.loads(row["payload"])}
+
+    def finish_job(self, job_id: int, error: str | None = None) -> None:
+        self.conn.execute(
+            "UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?",
+            ("error" if error else "done", error, utcnow(), job_id))
+        self.conn.commit()
+
+    def requeue_stale_jobs(self) -> int:
+        cur = self.conn.execute(
+            "UPDATE jobs SET status='queued', updated_at=? WHERE status='running'",
+            (utcnow(),))
+        self.conn.commit()
+        return cur.rowcount
+
+    def job_state_for_key(self, kind: str, key: str) -> tuple[str | None, str | None]:
+        """State of the MOST RECENT job for this key: 'pending' while queued or
+        running, 'error' with detail after a failure, None once done."""
+        row = self.conn.execute(
+            "SELECT status, error FROM jobs WHERE kind=? AND key=?"
+            " ORDER BY id DESC LIMIT 1", (kind, key)).fetchone()
+        if row is None or row["status"] == "done":
+            return None, None
+        if row["status"] == "error":
+            return "error", row["error"]
+        return "pending", None
+
     # ------------------------------------------------------------ data rights
-    def wipe(self) -> int:
+    def wipe(self, factory: bool = False) -> int:
         cur = self.conn.cursor()
         n = cur.execute(
             "SELECT COUNT(*) FROM documents WHERE tenant_id = ?", (LOCAL_TENANT,)
@@ -485,9 +624,26 @@ class SqliteRepo:
         cur.execute("DELETE FROM tags")
         cur.execute("DELETE FROM documents")
         cur.execute("DELETE FROM sync_state")
-        self._oplog(cur, "tenant", LOCAL_TENANT, "wipe")
+        if factory:
+            # factory reset: operational data too — events, oplog, tombstones,
+            # conflict payloads, device registrations. Local-only by design:
+            # without an oplog there is nothing left to propagate.
+            for table in ("events", "oplog", "deletions", "sync_conflicts",
+                          "devices"):
+                cur.execute(f"DELETE FROM {table}")
+        else:
+            self._oplog(cur, "tenant", LOCAL_TENANT, "wipe")
         self.conn.commit()
         return n
+
+    def dump_operational(self) -> dict:
+        """Everything OUTSIDE the knowledge tables that still holds user data —
+        exported so 'full export' means full (events log questions and URLs)."""
+        out: dict = {}
+        for table in ("events", "sync_conflicts", "deletions"):
+            rows = self.conn.execute(f"SELECT * FROM {table}").fetchall()
+            out[table] = [dict(r) for r in rows]
+        return out
 
     # -------------------------------------------------------------- sync ops
     def latest_seq(self) -> int:

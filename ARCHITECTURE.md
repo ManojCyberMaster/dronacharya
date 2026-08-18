@@ -160,12 +160,14 @@ query ──► vector candidates ───────┘        top ~30       
   multilingual preset). Queries never leave the machine to be embedded.
 - **Reciprocal-rank fusion** merges keyword and semantic candidates without
   score calibration headaches.
-- The **cross-encoder reranker** (`rerank = "auto"`) turns on when CUDA is
-  present, or force it with `"on"` (it is small enough for CPU). Its logit
-  scores are the *confidence signal*: `min_confidence` gates whether the KB is
-  considered to cover a query at all. Without the reranker, fusion scores are
-  rank-based and cannot express "nothing matches" — enable it if you want
-  honest "No" answers offline.
+- The **cross-encoder reranker** defaults to `"on"` (small enough for CPU;
+  `"auto"` restricts it to CUDA machines). Its scores are sigmoid-normalized
+  probabilities in (0,1) — one calibrated scale on every machine — gated by
+  `retrieval.min_relevance` (default 0.30, tuned against the golden eval set
+  in `tests/test_eval_retrieval.py`: ≥90% acceptance of covered questions,
+  100% refusal of off-corpus ones). Raw RRF scores (only when `rerank="off"`)
+  are rank-based and cannot express "nothing matches"; they get their own
+  threshold and honest documentation of that weakness.
 - `dc search` refuses to show below-threshold garbage (say "No" instead);
   `--all` reveals weak matches.
 
@@ -190,10 +192,12 @@ flowchart TD
     DEMOTE --> ASK
 ```
 
-- **"High confidence" exists only when grounded**: the model answered *from
-  pages that were actually fetched* via your own SearxNG, and the cited URL is
-  one of them. A bare model's self-reported confidence is always demoted — a
-  reachable URL doesn't prove the model read it.
+- **"High confidence" exists only when grounded AND verified**: the model
+  answered *from pages actually fetched* via your own SearxNG, the cited URL
+  is one of them, and a claim-to-passage check (the reranker cross-encoder
+  scoring answer-vs-page) confirms the cited page supports the claim. A bare
+  model's self-reported confidence is always demoted — a reachable URL
+  doesn't prove the model read it, and a fetched URL doesn't prove support.
 - KB answers cite the context items used (`[n]`, stripped before display) so
   multi-part answers attribute **all** their sources, not just the top hit.
 - Unverified answers print "No verified answer" with escape hatches
@@ -210,7 +214,12 @@ the model rejected. Deeper answers are never auto-saved.
 ## 7. LLM provider layer
 
 Providers implement one small protocol (`available()`, `complete()`,
-`stream()`) and are tried in the user's configured order:
+`stream()`) and are tried in the user's configured order **per task**:
+`get_provider_chain(config, task)` lets `[llm].distill_providers` pin small
+local models to distillation, and the `[privacy]` per-task policy
+(`local-only`) removes cloud providers from a task's chain entirely — silent
+local→cloud fallthrough is structurally impossible, not just discouraged.
+The base order:
 `anthropic`, `openai`, `ollama`, `vllm` (the last two are one
 OpenAI-compatible client pointed at different URLs).
 
@@ -248,7 +257,12 @@ only to the server URL you configure.
 ## 9. Server, web UI, extension
 
 - **FastAPI server** (`dc serve`, default `127.0.0.1:8317`): REST + SSE under
-  `/api/v1`, bearer-token auth (generated at `dc init`), static web UI. The
+  `/api/v1` (self-documented at `/api/v1/docs`), bearer-token auth: the
+  config token is the admin key, and `dc token create` mints scoped
+  per-device tokens (read/write/admin, sha256-hashed, revocable). Startup
+  beyond loopback is refused without a real token. Background distillation
+  runs through a durable `jobs` table — queued work survives restarts and a
+  crash-recovery pass finishes it. The
   same process serves standalone laptops and the Docker home-server role
   (Postgres + Ollama/vLLM containers; SearxNG behind a compose profile).
 - **Web UI** (vanilla JS, no build step): chat with cited streaming answers,
@@ -266,17 +280,26 @@ only to the server URL you configure.
 ## 10. Multi-device sync
 
 Every device runs a complete offline KB. `dc sync` reconciles with a home
-server through a versioned op log:
+server through a versioned op log (opportunistically after saves when
+`[sync] auto` is on):
 
 - **Deletions always win** (a delete on any device removes everywhere).
-- Concurrent edits resolve by **last-write-wins**, and the losing version is
-  kept for review (`dc conflicts`) — nothing is silently lost.
+- Concurrent edits resolve by the **per-document version counter** (a
+  logical clock — immune to wall-clock skew), wall time only breaking
+  version ties; the losing version is kept for review (`dc conflicts`).
+- **Embeddings never travel**: ops carry text + metadata, each device
+  re-embeds with its own model. A KB is bound to one embedding model via a
+  stored fingerprint; changing models requires `dc reembed`.
 - Saves distilled weakly offline (extractive tier) are **upgraded by the
   server's bigger model** on sync.
 - Auto-sync runs opportunistically; everything works between syncs.
 
 ## 11. Guardrails
 
+- **SSRF defense**: server-side fetches validate the target and every
+  redirect hop (private/loopback/link-local/metadata blocked in server
+  role; `[guardrails] allow_private_urls` policy), with bounded
+  decompression. Request bodies and list parameters are capped.
 - **Thin-page guard**: extractions under ~300 chars are rejected (login walls,
   cookie screens) rather than stored as junk.
 - **Challenge-page detection**: CAPTCHA/anti-bot interstitials are recognized

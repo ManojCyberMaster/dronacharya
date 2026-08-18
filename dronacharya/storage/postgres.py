@@ -103,6 +103,23 @@ CREATE TABLE IF NOT EXISTS sync_state (
   file_path TEXT PRIMARY KEY, mtime DOUBLE PRECISION NOT NULL,
   content_hash TEXT NOT NULL, last_synced TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS kb_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL,
+  created_at TEXT NOT NULL, last_used TEXT, revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id BIGSERIAL PRIMARY KEY, kind TEXT NOT NULL, key TEXT NOT NULL,
+  payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_key ON jobs (kind, key, id);
 """
 
 
@@ -111,6 +128,8 @@ def _vec(embedding: list[float]) -> str:
 
 
 def _parse_vec(value) -> list[float]:
+    if value is None:
+        return []          # vector-less unit (awaiting reembed)
     if isinstance(value, (list, tuple)):
         return list(value)
     return [float(x) for x in str(value).strip("[]").split(",") if x]
@@ -121,21 +140,61 @@ def _tsquery(query: str) -> str:
     return " | ".join(t for t in terms if t)
 
 
+_MIGRATED_DSNS: set[str] = set()   # migrate once per process, not per request
+_POOL: dict[str, list] = {}        # dsn -> idle connections (per process)
+_POOL_MAX = 8
+_POOL_LOCK = __import__("threading").Lock()
+
+
+def _pool_get(dsn: str):
+    with _POOL_LOCK:
+        idle = _POOL.get(dsn) or []
+        while idle:
+            conn = idle.pop()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                return conn
+            except Exception:  # noqa: BLE001 — stale connection: discard
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+    return None
+
+
+def _pool_put(dsn: str, conn) -> bool:
+    with _POOL_LOCK:
+        idle = _POOL.setdefault(dsn, [])
+        if len(idle) < _POOL_MAX:
+            idle.append(conn)
+            return True
+    return False
+
+
 class PostgresRepo:
     sync_origin: str = "local"
 
     def __init__(self, dsn: str):
         import pg8000.dbapi
 
-        parsed = urlparse(dsn)
-        self.conn = pg8000.dbapi.connect(
-            user=parsed.username or "dronacharya",
-            password=parsed.password or "",
-            host=parsed.hostname or "localhost",
-            port=parsed.port or 5432,
-            database=(parsed.path or "/dronacharya").lstrip("/"),
-        )
-        self._migrate()
+        self._dsn = dsn
+        pooled = _pool_get(dsn)
+        if pooled is not None:
+            self.conn = pooled
+        else:
+            parsed = urlparse(dsn)
+            self.conn = pg8000.dbapi.connect(
+                user=parsed.username or "dronacharya",
+                password=parsed.password or "",
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 5432,
+                database=(parsed.path or "/dronacharya").lstrip("/"),
+            )
+        if dsn not in _MIGRATED_DSNS:
+            self._migrate()
+            _MIGRATED_DSNS.add(dsn)
 
     def _migrate(self) -> None:
         cur = self.conn.cursor()
@@ -205,7 +264,8 @@ class PostgresRepo:
                 " kind, heading_path, lang, embedding)"
                 " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CAST(%s AS vector))",
                 (unit.id, doc.id, unit.tenant_id, unit.seq, unit.text, unit.kind,
-                 unit.heading_path, unit.lang, _vec(emb)),
+                 unit.heading_path, unit.lang,
+                 _vec(emb) if emb else None),   # vector-less until reembed
             )
 
     def insert_document(self, doc: Document, units: list[KnowledgeUnit],
@@ -520,7 +580,123 @@ class PostgresRepo:
         self.conn.commit()
 
     # ------------------------------------------------------------ data rights
-    def wipe(self) -> int:
+
+
+    # ----------------------------------------------------------------- kb meta
+    def get_meta(self, key: str) -> str | None:
+        cur = self.conn.cursor()
+        cur.execute("SELECT value FROM kb_meta WHERE key=%s", (key,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO kb_meta (key, value) VALUES (%s,%s)"
+            " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (key, value))
+        self.conn.commit()
+
+    # -------------------------------------------------------------- api tokens
+    def create_token(self, name: str, scopes: list[str]) -> tuple[int, str]:
+        import hashlib
+        import secrets
+
+        plaintext = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(plaintext.encode()).hexdigest()
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO api_tokens (name, token_hash, scopes, created_at)"
+            " VALUES (%s,%s,%s,%s) RETURNING id",
+            (name, digest, ",".join(sorted(set(scopes))), utcnow()))
+        token_id = int(cur.fetchone()[0])
+        self.conn.commit()
+        return token_id, plaintext
+
+    def list_tokens(self) -> list[dict]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, name, scopes, created_at, last_used, revoked"
+                    " FROM api_tokens ORDER BY id")
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
+
+    def revoke_token(self, token_id: int) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE api_tokens SET revoked=TRUE WHERE id=%s", (token_id,))
+        n = cur.rowcount
+        self.conn.commit()
+        return n > 0
+
+    def verify_token(self, plaintext: str) -> list[str] | None:
+        import hashlib
+
+        digest = hashlib.sha256(plaintext.encode()).hexdigest()
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, scopes FROM api_tokens"
+                    " WHERE token_hash=%s AND NOT revoked", (digest,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        cur.execute("UPDATE api_tokens SET last_used=%s WHERE id=%s",
+                    (utcnow(), row[0]))
+        self.conn.commit()
+        return row[1].split(",") if row[1] else []
+
+    # ------------------------------------------------------------ durable jobs
+    def enqueue_job(self, kind: str, key: str, payload: dict) -> int:
+        import json as json_mod
+
+        cur = self.conn.cursor()
+        now = utcnow()
+        cur.execute(
+            "INSERT INTO jobs (kind, key, payload, status, created_at, updated_at)"
+            " VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+            (kind, key, json_mod.dumps(payload), "queued", now, now))
+        job_id = int(cur.fetchone()[0])
+        self.conn.commit()
+        return job_id
+
+    def claim_next_job(self) -> dict | None:
+        import json as json_mod
+
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE jobs SET status='running', updated_at=%s WHERE id = ("
+            "  SELECT id FROM jobs WHERE status='queued' ORDER BY id"
+            "  LIMIT 1 FOR UPDATE SKIP LOCKED)"
+            " RETURNING id, kind, key, payload", (utcnow(),))
+        row = cur.fetchone()
+        self.conn.commit()
+        if row is None:
+            return None
+        return {"id": int(row[0]), "kind": row[1], "key": row[2],
+                "payload": json_mod.loads(row[3])}
+
+    def finish_job(self, job_id: int, error: str | None = None) -> None:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE jobs SET status=%s, error=%s, updated_at=%s WHERE id=%s",
+                    ("error" if error else "done", error, utcnow(), job_id))
+        self.conn.commit()
+
+    def requeue_stale_jobs(self) -> int:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE jobs SET status='queued', updated_at=%s"
+                    " WHERE status='running'", (utcnow(),))
+        n = cur.rowcount
+        self.conn.commit()
+        return n
+
+    def job_state_for_key(self, kind: str, key: str) -> tuple[str | None, str | None]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT status, error FROM jobs WHERE kind=%s AND key=%s"
+                    " ORDER BY id DESC LIMIT 1", (kind, key))
+        row = cur.fetchone()
+        if row is None or row[0] == "done":
+            return None, None
+        if row[0] == "error":
+            return "error", row[1]
+        return "pending", None
+
+    def wipe(self, factory: bool = False) -> int:
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
         n = int(cur.fetchone()[0])
@@ -536,9 +712,23 @@ class PostgresRepo:
         cur.execute("DELETE FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
         cur.execute("DELETE FROM tags WHERE tenant_id = %s", (LOCAL_TENANT,))
         cur.execute("DELETE FROM sync_state")
-        self._oplog(cur, "tenant", LOCAL_TENANT, "wipe")
+        if factory:
+            for table in ("events", "oplog", "deletions", "sync_conflicts",
+                          "devices"):
+                cur.execute(f"DELETE FROM {table}")   # noqa: S608 — fixed names
+        else:
+            self._oplog(cur, "tenant", LOCAL_TENANT, "wipe")
         self.conn.commit()
         return n
+
+    def dump_operational(self) -> dict:
+        out: dict = {}
+        cur = self.conn.cursor()
+        for table in ("events", "sync_conflicts", "deletions"):
+            cur.execute(f"SELECT * FROM {table}")   # noqa: S608 — fixed names
+            cols = [d[0] for d in cur.description]
+            out[table] = [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
+        return out
 
     def counts(self) -> dict:
         cur = self.conn.cursor()
@@ -550,4 +740,14 @@ class PostgresRepo:
         return out
 
     def close(self) -> None:
-        self.conn.close()
+        # rollback any half-open transaction, then return to the pool
+        try:
+            self.conn.rollback()
+        except Exception:  # noqa: BLE001 — dead connection: just drop it
+            try:
+                self.conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        if not _pool_put(self._dsn, self.conn):
+            self.conn.close()

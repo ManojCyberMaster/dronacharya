@@ -69,6 +69,14 @@ class KnowledgeUnit:
     lang: str | None = None
 
 
+def doc_capabilities(source_type: str) -> dict:
+    """Server-declared per-document behavior so no client hardcodes
+    source_type checks: whether units are editable in place, and which
+    dedicated editor (if any) owns the document."""
+    editor = source_type if source_type in ("mindmap", "todo") else None
+    return {"editable_units": editor is None, "editor": editor}
+
+
 @dataclass
 class SearchResult:
     unit: KnowledgeUnit

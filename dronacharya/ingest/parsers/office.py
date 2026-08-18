@@ -166,14 +166,27 @@ class XlsxParser:
         return out
 
     @staticmethod
-    def _rows(root, shared: list[str]) -> tuple[list[str], bool]:
+    def _col_index(ref: str) -> int | None:
+        """'C2' -> 2. Excel omits empty cells from the XML entirely, so cell
+        POSITION must come from the reference, never from document order."""
+        m = re.match(r"([A-Z]+)\d*$", ref or "")
+        if not m:
+            return None
+        idx = 0
+        for ch in m.group(1):
+            idx = idx * 26 + ord(ch) - 64
+        return idx - 1
+
+    @classmethod
+    def _rows(cls, root, shared: list[str]) -> tuple[list[str], bool]:
         lines: list[str] = []
         truncated = False
         for row in root.iter(f"{S}row"):
             if len(lines) >= MAX_SHEET_ROWS:
                 truncated = True
                 break
-            cells: list[str] = []
+            cells: dict[int, str] = {}
+            pos = 0
             for c in row.iter(f"{S}c"):
                 ctype = c.get("t", "")
                 if ctype == "inlineStr":
@@ -186,8 +199,15 @@ class XlsxParser:
                             val = shared[int(val)]
                         except (ValueError, IndexError):
                             pass
-                cells.append(val)
-            line = "\t".join(cells).rstrip()
+                col = cls._col_index(c.get("r", ""))
+                if col is None:
+                    col = pos
+                cells[col] = val
+                pos = col + 1
+            if not cells:
+                continue
+            line = "\t".join(cells.get(i, "")
+                             for i in range(max(cells) + 1)).rstrip()
             if line.strip():
                 lines.append(line)
         return lines, truncated

@@ -75,3 +75,27 @@ class SentenceTransformerEmbedder:
 def get_embedder(config) -> Embedder:
     emb = config.embeddings
     return SentenceTransformerEmbedder(emb.model_name, emb.preset)
+
+
+FINGERPRINT_KEY = "embedding_fingerprint"
+
+
+def embedding_fingerprint(config) -> str:
+    from .config import EMBEDDING_DIM
+
+    return f"{config.embeddings.model_name}:{EMBEDDING_DIM}"
+
+
+def ensure_embedding_compat(repo, config) -> None:
+    """A KB is bound to ONE embedding model: mixing vectors from different
+    models silently corrupts nearest-neighbor search. First use stamps the
+    fingerprint; a mismatch refuses with the fix spelled out."""
+    current = embedding_fingerprint(config)
+    stored = repo.get_meta(FINGERPRINT_KEY)
+    if stored is None:
+        repo.set_meta(FINGERPRINT_KEY, current)
+        return
+    if stored != current:
+        raise RuntimeError(
+            f"embedding model changed ({stored} -> {current}); the existing "
+            "index is incompatible — run `dc reembed` to rebuild it")

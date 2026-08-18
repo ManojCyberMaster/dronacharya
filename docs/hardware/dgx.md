@@ -109,6 +109,14 @@ vllm_url = "http://vllm:8000/v1"
 vllm_model = "Qwen/Qwen2.5-72B-Instruct-AWQ"
 ```
 
+## Performance notes
+
+Throughput figures in this guide are indicative, measured informally on one
+DGX Spark (GB10, aarch64, vLLM prefix caching on, batch saves). Your numbers
+will vary with model revision, quantization, context length, and concurrency
+— treat them as ranking guidance, not benchmarks. Reproducible benchmark
+tooling is tracked in IMPROVEMENT-PLAN.md.
+
 ## Recommended models by VRAM
 
 | VRAM | Ollama model | Notes |

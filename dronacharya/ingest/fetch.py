@@ -24,6 +24,67 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+# ------------------------------------------------------------------ SSRF ---
+# A fetcher that runs on a SERVER on behalf of clients must not be usable to
+# probe loopback/LAN/cloud-metadata addresses. On a personal standalone
+# machine, fetching your own intranet wiki is legitimate — so the policy is
+# role-aware (see allow_private_urls in config, "auto" by default).
+# Known limitation: host is validated by resolving before the request
+# (validate-then-connect); full DNS-rebinding immunity needs a pinned-IP
+# transport and is tracked for the durable-jobs rework.
+
+
+def _host_is_private(host: str) -> bool:
+    import ipaddress
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True   # unresolvable: treat as unsafe
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return True
+    return False
+
+
+def _validate_target(url: str, allow_private: bool) -> str | None:
+    """Returns an error string, or None when the URL is acceptable."""
+    parts = urlparse(url)
+    if parts.scheme not in ("http", "https"):
+        return "unsupported URL scheme"
+    if not parts.hostname:
+        return "no host in URL"
+    if not allow_private and _host_is_private(parts.hostname):
+        return "blocked: private/internal address"
+    return None
+
+
+class _ValidatedRedirects(urllib.request.HTTPRedirectHandler):
+    """Re-validate every redirect hop — an approved public URL must not be
+    able to bounce the fetcher into the LAN."""
+
+    def __init__(self, allow_private: bool):
+        self.allow_private = allow_private
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        err = _validate_target(newurl, self.allow_private)
+        if err:
+            raise urllib.error.URLError(f"redirect {err}: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def allow_private_urls(config) -> bool:
+    """Config policy: 'auto' allows private targets except in server role."""
+    mode = getattr(config.guardrails, "allow_private_urls", "auto")
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    return config.deployment.role != "server"
+
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 HOST_MIN_INTERVAL = 1.0  # seconds between requests to the same host
 
@@ -65,12 +126,20 @@ def _throttle(host: str) -> None:
     _last_fetch[host] = time.monotonic()
 
 
-def _attempt(url: str, headers: dict[str, str], timeout: int) -> str:
+def _attempt(url: str, headers: dict[str, str], timeout: int,
+             allow_private: bool = True) -> str:
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    opener = urllib.request.build_opener(_ValidatedRedirects(allow_private))
+    with opener.open(req, timeout=timeout) as resp:
         raw = resp.read(MAX_PAGE_BYTES)
         if resp.headers.get("Content-Encoding", "").lower() == "gzip":
-            raw = gzip.decompress(raw)
+            # bounded decompression — a 5MB gzip can expand to gigabytes
+            import io
+
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+                raw = gz.read(MAX_PAGE_BYTES + 1)
+            if len(raw) > MAX_PAGE_BYTES:
+                raise ValueError("page too large after decompression")
         charset = resp.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace")
 
@@ -96,27 +165,46 @@ def _attempt_system_curl(url: str, timeout: int) -> str:
     return proc.stdout[:MAX_PAGE_BYTES].decode("utf-8", errors="replace")
 
 
-def fetch_page(url: str, timeout: int = 30) -> tuple[str | None, str | None]:
+def _looks_like_challenge(html: str) -> bool:
+    """Anti-bot interstitial, not an article that merely QUOTES one.
+    A marker phrase alone is not enough — real interstitials are tiny pages
+    and/or carry the phrase in the <title> ("Just a moment...")."""
+    import html as html_mod
+    import re
+
+    # entity/typography-agnostic: Anubis writes "you&#39;re not a bot"
+    head = html_mod.unescape(html[:4000]).lower().replace("’", "'")
+    hits = [m for m in _CHALLENGE_MARKERS if m in head]
+    if not hits:
+        return False
+    m = re.search(r"<title[^>]*>(.*?)</title>", head, re.S)
+    title = m.group(1) if m else ""
+    return any(h in title for h in hits) or len(html) < 6000
+
+
+def fetch_page(url: str, timeout: int = 30,
+               allow_private: bool = True) -> tuple[str | None, str | None]:
     """Fetch exactly one page. Returns (html, None) or (None, error_reason)."""
-    if not url.startswith(("http://", "https://")):
-        return None, "unsupported URL scheme"
+    err = _validate_target(url, allow_private)
+    if err:
+        return None, err
     host = urlparse(url).netloc
     error: str = "unreachable"
-    attempts = (
-        lambda: _attempt(url, _BROWSER_HEADERS, timeout),
-        lambda: _attempt(url, _CURL_HEADERS, timeout),
-        lambda: _attempt_system_curl(url, timeout),
-    )
+    attempts = [
+        lambda: _attempt(url, _BROWSER_HEADERS, timeout, allow_private),
+        lambda: _attempt(url, _CURL_HEADERS, timeout, allow_private),
+    ]
+    if allow_private:
+        # system curl can't re-validate redirect hops — only use it when
+        # private targets are permitted anyway (personal/standalone role)
+        attempts.append(lambda: _attempt_system_curl(url, timeout))
     for i, attempt in enumerate(attempts):
         if i:
             time.sleep(2 * i)  # backoff: 2s, then 4s
         _throttle(host)
         try:
             html = attempt()
-            import html as html_mod
-            # entity/typography-agnostic: Anubis writes "you&#39;re not a bot"
-            head = html_mod.unescape(html[:4000]).lower().replace("’", "'")
-            if any(m in head for m in _CHALLENGE_MARKERS):
+            if _looks_like_challenge(html):
                 error = "bot challenge page"
                 continue  # retry with the next identity
             return html, None

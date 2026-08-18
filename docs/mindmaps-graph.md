@@ -123,7 +123,7 @@ KB already stores — no LLM calls, works offline, nothing new persisted.
 
 A full GraphRAG upgrade (entities extracted at save time, persistent entity
 graph, multi-hop retrieval) is designed but not built — see
-`docs/graphrag-proposal.md`.
+a future GraphRAG exploration (not yet in this repo).
 
 ## Browser extension: capture behind logins, to-do reminders
 

@@ -16,40 +16,41 @@ seed_app = typer.Typer(help="Seed knowledge kits — portable starter knowledge.
 app.add_typer(seed_app, name="seed")
 tags_app = typer.Typer(help="Manage tags across the whole knowledge base.")
 app.add_typer(tags_app, name="tags")
+token_app = typer.Typer(help="Scoped API tokens for devices/clients "
+                             "(the config token stays the admin key).")
+app.add_typer(token_app, name="token")
 console = Console()
 
 
 def _open_repo():
+    from .embeddings import ensure_embedding_compat
     from .storage import get_repo
 
-    return get_repo(load_config())
-
-
-def _remote_api(config, path: str, payload: dict, timeout: int = 90) -> dict | None:
-    """POST to the configured home server; None when unreachable (client
-    then falls back to fully-local operation — offline-first, by design)."""
-    import json as json_mod
-    import urllib.request
-
-    if config.deployment.role != "client" or not config.server.remote_url:
-        return None
-    req = urllib.request.Request(
-        config.server.remote_url.rstrip("/") + "/api/v1" + path,
-        data=json_mod.dumps(payload).encode(),
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {config.server.token}"},
-    )
+    config = load_config()
+    repo = get_repo(config)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json_mod.loads(resp.read())
-    except Exception:  # noqa: BLE001 — offline / server down / auth mismatch
-        return None
+        ensure_embedding_compat(repo, config)
+    except RuntimeError as e:
+        repo.close()
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+    return repo
 
 
 def _embedder(config):
     from .embeddings import get_embedder
 
     return get_embedder(config)
+
+
+def _auto_sync(config, repo) -> None:
+    """[sync] auto: reconcile with the home server after KB-touching work."""
+    from .sync.client import maybe_auto_sync
+
+    report = maybe_auto_sync(repo, config)
+    if report and (report.pushed or report.pulled or report.deleted):
+        console.print(f"[dim]auto-synced: +{report.pulled} from server, "
+                      f"{report.pushed} pushed[/dim]")
 
 
 @app.command()
@@ -103,6 +104,7 @@ def save(
         color = {"created": "green", "updated": "green",
                  "unchanged": "yellow", "blocked": "red"}.get(outcome.status, "white")
         console.print(f"[{color}]{outcome.status}[/{color}]: {outcome.message}")
+        _auto_sync(config, repo)
     finally:
         repo.close()
 
@@ -134,89 +136,64 @@ def ask(
     guess: bool = typer.Option(False, "--guess",
                                help="Show low-confidence (unverified) web answers "
                                     "instead of refusing"),
+    local: bool = typer.Option(False, "--local",
+                               help="Answer from this machine only — skip the "
+                                    "home server"),
 ):
     """Quick answer: the command line + one usage example, nothing else.
     Also the default — `dc "how do I …"` runs this command. Falls back to an
     internet search when your knowledge base doesn't know, and embeds the
     qualified answer back into the KB (low-confidence answers ask you first)."""
-    from .quick import quick_ask, save_quick_answer
+    from .client import ask_local, ask_remote, save_vetted_answer
 
     config = load_config()
-
-    # Fast path: a configured home server answers with warm models — no
-    # local model load at all. Falls back to local when offline.
-    remote = _remote_api(config, "/ask", {"question": question})
-    if remote is not None:
-        if remote["mode"] == "no_provider":
-            console.print("[red]The server has no LLM provider available.[/red]")
-            if remote.get("error"):
-                console.print(f"[dim]{remote['error'][:300]}[/dim]")
-            raise typer.Exit(1)
-        if (remote["mode"] == "web" and remote.get("confidence") != "high"
-                and not guess):
-            _no_verified_answer(question)
-            return
-        console.print(remote["answer"])
-        if remote["mode"] == "declined":
-            return
-        for u in remote.get("source_urls") or ([remote["source_url"]]
-                                               if remote.get("source_url") else []):
-            console.print(f"[italic cyan]{u}[/italic cyan]")
-        where = ("your knowledge base" if remote["mode"] == "kb"
-                 else _web_origin(remote.get("grounded", False),
-                                  remote.get("confidence")))
-        console.print(f"[dim]from {where} · {remote['provider']} · via server[/dim]")
-        if remote.get("saved"):
-            console.print("[green]✓ added to your knowledge base[/green]")
-        elif remote.get("save_payload") and not no_save and (
-                yes or typer.confirm("Low confidence — add to your knowledge base "
-                                     "anyway?", default=False)):
-            saved = _remote_api(config, "/ask/save",
-                                {"question": question,
-                                 "payload": remote["save_payload"],
-                                 "provider": remote.get("provider", "")})
-            if saved:
-                console.print("[green]✓ added (verified by you)[/green]")
-            else:
-                console.print("[red]server unreachable — answer not saved[/red]")
-        return
-
-    repo = _open_repo()
+    repo = embedder = None
     try:
-        result = quick_ask(repo, _embedder(config), config, question)
-        if result.mode == "no_provider":
-            console.print("[red]No LLM provider is available.[/red] Configure one in "
+        # ONE render path for both transports — the facade normalizes them.
+        out = None if local else ask_remote(config, question, no_save=no_save)
+        if out is None:
+            repo = _open_repo()
+            embedder = _embedder(config)
+            out = ask_local(config, repo, embedder, question, no_save=no_save)
+        if out.mode == "no_provider":
+            where = ("The server has no" if out.origin == "server"
+                     else "No") + " LLM provider available."
+            console.print(f"[red]{where}[/red] Configure one in "
                           f"[bold]{config_path()}[/bold] → [llm]. "
                           "Meanwhile `dc search` works fully offline.")
+            if out.error:
+                console.print(f"[dim]{out.error[:300]}[/dim]")
             raise typer.Exit(1)
-        if result.mode == "web" and result.confidence != "high" and not guess:
+        if out.mode == "web" and out.confidence != "high" and not guess:
             _no_verified_answer(question)
             return
-        console.print(result.answer)
-        if result.mode == "declined":
+        console.print(out.answer)
+        if out.mode == "declined":
             return
-        for u in result.source_urls or ([result.source_url]
-                                        if result.source_url else []):
+        for u in out.source_urls:
             console.print(f"[italic cyan]{u}[/italic cyan]")
-        if result.mode == "kb":
-            console.print(f"[dim]from your knowledge base · {result.provider}[/dim]")
+        origin_note = " · via server" if out.origin == "server" else ""
+        where = ("your knowledge base" if out.mode == "kb"
+                 else _web_origin(out.grounded, out.confidence))
+        console.print(f"[dim]from {where} · {out.provider}{origin_note}[/dim]")
+        if out.mode == "kb":
             return
-        console.print(f"[dim]from {_web_origin(result.grounded, result.confidence)} "
-                      f"· {result.provider}[/dim]")
-        if no_save or not result.save_payload:
-            return
-        if result.confidence == "high":
-            save_quick_answer(repo, _embedder(config), config, question,
-                              result.save_payload, result.provider)
+        if out.saved:
             console.print("[green]✓ added to your knowledge base[/green]")
-        elif yes or typer.confirm("Low confidence — add to your knowledge base anyway?",
-                                  default=False):
-            save_quick_answer(repo, _embedder(config), config, question,
-                              result.save_payload, result.provider,
-                              user_verified=True)
-            console.print("[green]✓ added (verified by you)[/green]")
+        elif out.save_payload and not no_save and (
+                yes or typer.confirm("Low confidence — add to your knowledge "
+                                     "base anyway?", default=False)):
+            if repo is None and out.origin == "local":
+                repo = _open_repo()
+                embedder = _embedder(config)
+            ok = save_vetted_answer(config, question, out.save_payload,
+                                    out.provider, origin=out.origin,
+                                    repo=repo, embedder=embedder)
+            console.print("[green]✓ added (verified by you)[/green]" if ok
+                          else "[red]server unreachable — answer not saved[/red]")
     finally:
-        repo.close()
+        if repo is not None:
+            repo.close()
 
 
 @seed_app.command("build")
@@ -271,7 +248,7 @@ def seed_install(
         data = load_kit(kit)
     except Exception as e:  # noqa: BLE001
         console.print(f"[red]Could not load kit:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     repo = _open_repo()
     try:
         console.print(f"Installing [bold]{data.get('name')}[/bold] "
@@ -363,6 +340,8 @@ def sync_notes():
                       f"unchanged={report.unchanged}")
         for line in report.skipped:
             console.print(f"[yellow]skipped[/yellow] {line}")
+        if report.changed:
+            _auto_sync(config, repo)
     finally:
         repo.close()
 
@@ -376,66 +355,41 @@ def search(
     show_all: bool = typer.Option(False, "--all",
                                   help="Also show weak matches below the "
                                        "confidence threshold"),
+    local: bool = typer.Option(False, "--local",
+                               help="Search this machine's knowledge base only"),
 ):
     """Search your knowledge base (hybrid keyword + semantic)."""
-    from .search import hybrid_search
+    from .client import search_local, search_remote
 
     config = load_config()
+    results = None if local else search_remote(config, query, k=k,
+                                               tags=tag or None,
+                                               show_all=show_all)
+    if results is None:
+        repo = _open_repo()
+        try:
+            results = search_local(config, repo, _embedder(config), query,
+                                   k=k, tags=tag or None, show_all=show_all)
+        finally:
+            repo.close()
 
-    def _no_coverage() -> None:
+    # ONE render path — both transports return the shared result shape
+    if not results:
         console.print("[yellow]No.[/yellow] Your knowledge base doesn't cover "
                       "this.")
         console.print(f'[dim]try[/dim] dc "{query}"   [dim]quick answer with '
                       "web fallback[/dim]  [dim]· or --all for weak matches[/dim]")
-
-    remote = _remote_api(config, "/search",
-                         {"query": query, "k": k, "tags": tag or None}, timeout=30)
-    if remote is not None:
-        results = remote.get("results", [])
-        if not show_all:
-            results = [r for r in results
-                       if r["score"] >= config.retrieval.min_confidence]
-        if not results:
-            _no_coverage()
-            return
-        for i, r in enumerate(results, 1):
-            crumb = f" · {r['heading_path']}" if r.get("heading_path") else ""
-            console.print(f"[bold cyan]{i}. {r['title']}[/bold cyan]{crumb}  "
-                          f"[dim](score {r['score']:.4f})[/dim]")
-            console.print(f"   {r['text'][:240].replace(chr(10), ' ')}")
-        console.print("\n[bold]Sources[/bold]")
-        for i, r in enumerate(results, 1):
-            source = r.get("url") or r.get("file_path") or ""
-            if source:
-                console.print(f"  [{i}] [italic cyan underline]{source}[/italic cyan underline]")
         return
-
-    repo = _open_repo()
-    try:
-        from .reranker import get_reranker
-
-        results = hybrid_search(repo, _embedder(config), query,
-                                top_k=k, candidates=config.retrieval.candidates,
-                                reranker=get_reranker(config),
-                                tags=tag or None)
-        if not show_all:
-            results = [r for r in results
-                       if r.score >= config.retrieval.min_confidence]
-        if not results:
-            _no_coverage()
-            return
-        for i, r in enumerate(results, 1):
-            crumb = f" · {r.unit.heading_path}" if r.unit.heading_path else ""
-            console.print(f"[bold cyan]{i}. {r.document.title}[/bold cyan]{crumb}  "
-                          f"[dim](score {r.score:.4f})[/dim]")
-            console.print(f"   {r.unit.text[:240].replace(chr(10), ' ')}")
-        console.print("\n[bold]Sources[/bold]")
-        for i, r in enumerate(results, 1):
-            source = r.document.url or r.document.file_path or ""
-            if source:
-                console.print(f"  [{i}] [italic cyan underline]{source}[/italic cyan underline]")
-    finally:
-        repo.close()
+    for i, r in enumerate(results, 1):
+        crumb = f" · {r['heading_path']}" if r.get("heading_path") else ""
+        console.print(f"[bold cyan]{i}. {r['title']}[/bold cyan]{crumb}  "
+                      f"[dim](score {r['score']:.4f})[/dim]")
+        console.print(f"   {r['text'][:240].replace(chr(10), ' ')}")
+    console.print("\n[bold]Sources[/bold]")
+    for i, r in enumerate(results, 1):
+        source = r.get("url") or r.get("file_path") or ""
+        if source:
+            console.print(f"  [{i}] [italic cyan underline]{source}[/italic cyan underline]")
 
 
 @app.command()
@@ -527,6 +481,8 @@ def add(
                 repo.set_tags(outcome.document_id, sorted(existing | set(tag)))
         if not files:
             console.print("Nothing to add — no supported files found.")
+        else:
+            _auto_sync(config, repo)
     finally:
         repo.close()
 
@@ -609,12 +565,15 @@ def reembed(
     """Re-embed every knowledge unit with the currently configured embedding
     model. Needed after changing [embeddings].preset/model. Run it on every
     synced device (the embedding model must match across devices)."""
+    from .storage import get_repo
+
     config = load_config()
     if not yes and not typer.confirm(
         f"Re-embed everything with {config.embeddings.model_name}? This can take a while."
     ):
         raise typer.Exit(1)
-    repo = _open_repo()
+    # bypass the fingerprint guard — reembed IS the migration it demands
+    repo = get_repo(config)
     embedder = _embedder(config)
     done = 0
     try:
@@ -625,6 +584,9 @@ def reembed(
             # local re-index only: same ids, no version bump, nothing to sync
             repo.replace_document(doc, units, embeddings, bump_version=False)
             done += 1
+        from .embeddings import FINGERPRINT_KEY, embedding_fingerprint
+
+        repo.set_meta(FINGERPRINT_KEY, embedding_fingerprint(config))
         repo.log_event("reembed", {"documents": done, "model": config.embeddings.model_name})
         console.print(f"[green]Re-embedded {done} documents.[/green]")
     finally:
@@ -647,7 +609,7 @@ def sync():
                           " `dc conflicts`.[/yellow]")
     except SyncError as e:
         console.print(f"[red]sync failed:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     finally:
         repo.close()
 
@@ -718,6 +680,114 @@ def status():
 
 
 @app.command()
+def doctor():
+    """Diagnose this installation: config, models, providers, server link.
+    Run it whenever something says "unavailable" — it names the broken part."""
+    import time
+
+    from .config import load_config
+
+    def row(ok, label, detail=""):
+        mark = {True: "[green]✓[/green]", False: "[red]✗[/red]",
+                None: "[yellow]•[/yellow]"}[ok]
+        console.print(f" {mark} {label}" + (f" [dim]{detail}[/dim]" if detail else ""))
+
+    try:
+        config = load_config()
+        row(True, "config", str(config_path()))
+    except Exception as e:  # noqa: BLE001
+        row(False, "config", str(e))
+        raise typer.Exit(1) from None
+
+    # knowledge base + embedding fingerprint
+    try:
+        repo = _open_repo()
+        counts = repo.counts()
+        row(True, "knowledge base",
+            f"{counts.get('documents', 0)} docs / {counts.get('knowledge_units', 0)} units")
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001
+        row(False, "knowledge base", str(e))
+        raise typer.Exit(1) from None
+
+    # embedding model
+    try:
+        t0 = time.monotonic()
+        _embedder(config).embed_query("doctor warmup")
+        row(True, "embeddings", f"{config.embeddings.model_name} "
+            f"({time.monotonic() - t0:.1f}s warmup)")
+    except Exception as e:  # noqa: BLE001
+        row(False, "embeddings", str(e)[:120])
+
+    # reranker
+    from .reranker import _cuda_available, get_reranker
+    rr = get_reranker(config)
+    if rr is None:
+        row(None, "reranker", f"off (rerank={config.retrieval.rerank}) — "
+            "search cannot say an honest 'No' without it")
+    else:
+        row(True, "reranker",
+            f"{config.retrieval.rerank_model} on "
+            f"{'CUDA' if _cuda_available() else 'CPU'}")
+
+    # providers
+    import urllib.request
+
+    def ping(url):
+        try:
+            with urllib.request.urlopen(url, timeout=4) as r:
+                return r.status == 200
+        except Exception:  # noqa: BLE001
+            return False
+
+    import os
+    for name in config.llm.provider_order:
+        if name == "anthropic":
+            row(bool(os.environ.get("ANTHROPIC_API_KEY")) or None, "provider anthropic",
+                "ANTHROPIC_API_KEY " +
+                ("set" if os.environ.get("ANTHROPIC_API_KEY") else "not set"))
+        elif name == "openai":
+            row(bool(os.environ.get("OPENAI_API_KEY")) or None, "provider openai",
+                "OPENAI_API_KEY " +
+                ("set" if os.environ.get("OPENAI_API_KEY") else "not set"))
+        elif name == "ollama" and config.llm.ollama_url:
+            ok = ping(config.llm.ollama_url.rstrip("/") + "/models")
+            row(ok, "provider ollama", config.llm.ollama_url)
+        elif name == "vllm" and config.llm.vllm_url:
+            ok = ping(config.llm.vllm_url.rstrip("/") + "/models")
+            row(ok, "provider vllm", config.llm.vllm_url
+                + ("" if ok else " unreachable"))
+
+    # searxng
+    if config.websearch.searx_url:
+        ok = ping(config.websearch.searx_url.rstrip("/")
+                  + "/search?q=doctor&format=json")
+        row(ok, "searxng", config.websearch.searx_url +
+            ("" if ok else " unreachable or json format disabled"))
+    else:
+        row(None, "searxng", "not configured — web answers stay ungrounded/low")
+
+    # home server (client role)
+    if config.deployment.role == "client":
+        if not config.server.remote_url:
+            row(False, "home server", "role=client but server.remote_url is empty")
+        else:
+            from .client import remote_api
+            out = remote_api(config, "/search", {"query": "doctor", "k": 1},
+                             timeout=10)
+            row(out is not None, "home server", config.server.remote_url
+                + ("" if out is not None else " unreachable or bad token"))
+
+    # note directories
+    for d in config.notes.directories:
+        row(Path(d).expanduser().is_dir(), "notes dir", d)
+
+    repo.close()
+    console.print("[dim]fix anything marked ✗; • is optional[/dim]")
+
+
+@app.command()
 def serve(
     host: str = typer.Option(None, help="Override bind host"),
     port: int = typer.Option(None, help="Override port"),
@@ -727,26 +797,47 @@ def serve(
         import uvicorn
     except ImportError:
         console.print('[red]Server deps missing.[/red] Install with: pip install -e ".[server]"')
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     from .server.app import create_app
+    from .server.jobs import recover_and_start
 
     config = load_config()
     bind_host = host or config.server.host
     bind_port = port or config.server.port
+    insecure_token = config.server.token in ("", "CHANGE-ME")
+    if insecure_token and bind_host not in ("127.0.0.1", "localhost", "::1"):
+        console.print("[red]Refusing to bind beyond loopback without an API "
+                      "token.[/red] Set a long random [server].token in "
+                      f"[bold]{config_path()}[/bold] first — an empty token "
+                      "disables authentication entirely.")
+        raise typer.Exit(1)
     console.print(f"DronaCharya at [bold]http://{bind_host}:{bind_port}[/bold] "
                   f"(token in {config_path()})")
-    uvicorn.run(create_app(config), host=bind_host, port=bind_port, log_level="warning")
+    app_instance = create_app(config)
+    recover_and_start(app_instance)   # finish any distillations a crash orphaned
+    uvicorn.run(app_instance, host=bind_host, port=bind_port, log_level="warning")
 
 
 @app.command()
 def export(
     out: Path = typer.Option(Path("dronacharya-export.zip"), "--out", "-o"),
+    format: str = typer.Option("zip", "--format",
+                               help="zip (full JSON+markdown+operational) | "
+                                    "obsidian (a folder of Markdown notes "
+                                    "with frontmatter)"),
 ):
-    """Download all your data (JSON + markdown, zipped)."""
-    from .export import export_to_file
+    """Download all your data (JSON + markdown, zipped) — or an
+    Obsidian-ready folder of Markdown notes with --format obsidian."""
+    from .export import export_markdown_dir, export_to_file
 
     repo = _open_repo()
     try:
+        if format == "obsidian":
+            target = out if out.suffix == "" else out.with_suffix("")
+            n = export_markdown_dir(repo, target)
+            console.print(f"[green]Exported {n} notes to {target}/[/green] "
+                          "— open the folder as (or inside) an Obsidian vault.")
+            return
         path = export_to_file(repo, out)
         repo.log_event("export", {"path": str(path)})
         console.print(f"[green]Exported to {path}[/green]")
@@ -754,18 +845,82 @@ def export(
         repo.close()
 
 
+@token_app.command("create")
+def token_create(
+    name: str = typer.Argument(..., help="Device/client name, e.g. 'laptop'"),
+    scopes: str = typer.Option("read,write", "--scopes",
+                               help="Comma-separated: read, write, admin"),
+):
+    """Mint a scoped token; the plaintext is printed ONCE — store it in the
+    device's config or extension settings."""
+    repo = _open_repo()
+    try:
+        scope_list = [x.strip() for x in scopes.split(",") if x.strip()]
+        bad = set(scope_list) - {"read", "write", "admin"}
+        if bad or not scope_list:
+            console.print(f"[red]invalid scopes:[/red] {', '.join(bad) or '(none)'}")
+            raise typer.Exit(1)
+        token_id, plaintext = repo.create_token(name, scope_list)
+        console.print(f"[green]token #{token_id}[/green] ({name}, "
+                      f"{'/'.join(scope_list)}):")
+        console.print(f"[bold]{plaintext}[/bold]")
+        console.print("[dim]shown once — only a hash is stored[/dim]")
+    finally:
+        repo.close()
+
+
+@token_app.command("list")
+def token_list():
+    repo = _open_repo()
+    try:
+        rows = repo.list_tokens()
+        if not rows:
+            console.print("No device tokens. The [server].token in config.toml "
+                          "remains the admin key.")
+            return
+        for t in rows:
+            state = "[red]revoked[/red]" if t["revoked"] else "[green]active[/green]"
+            console.print(f"#{t['id']} {t['name']} · {t['scopes']} · {state}"
+                          f" · last used {t['last_used'] or 'never'}")
+    finally:
+        repo.close()
+
+
+@token_app.command("revoke")
+def token_revoke(token_id: int):
+    repo = _open_repo()
+    try:
+        ok = repo.revoke_token(token_id)
+        console.print("[green]revoked[/green]" if ok else "[red]not found[/red]")
+    finally:
+        repo.close()
+
+
 @app.command()
 def wipe(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation"),
+    factory: bool = typer.Option(False, "--factory",
+                                 help="Also erase operational data: event log, "
+                                      "sync history, conflict payloads, device "
+                                      "registrations. Local-only — does not "
+                                      "propagate to other devices."),
 ):
-    """Delete ALL knowledge from this device (tombstones propagate to synced devices)."""
+    """Delete ALL knowledge from this device (tombstones propagate to synced
+    devices). Plain wipe keeps the sync/audit trail so deletions reach your
+    other devices; --factory erases that too."""
     if not yes and not typer.confirm("Delete your entire knowledge base?"):
+        raise typer.Exit(1)
+    if factory and not yes and not typer.confirm(
+            "FACTORY RESET also erases sync history and the event log — "
+            "other devices will NOT learn about these deletions. Continue?"):
         raise typer.Exit(1)
     repo = _open_repo()
     try:
-        n = repo.wipe()
-        repo.log_event("wipe", {"documents": n})
-        console.print(f"[red]Deleted {n} documents.[/red]")
+        n = repo.wipe(factory=factory)
+        if not factory:
+            repo.log_event("wipe", {"documents": n})
+        console.print(f"[red]Deleted {n} documents"
+                      f"{' + all operational data' if factory else ''}.[/red]")
     finally:
         repo.close()
 

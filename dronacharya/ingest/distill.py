@@ -66,15 +66,13 @@ _ALLOWED_KINDS = {"fact", "concept", "howto"}
 
 
 def _json_loads_lenient(s: str):
-    """Models writing shell/regex examples emit invalid \\ escapes (\\*, \\e …);
-    repair them instead of demoting the whole save to extractive."""
-    import json
-    import re
+    """Back-compat shim — the shared repair lives in llm.loads_lenient."""
+    from ..llm import loads_lenient
 
-    try:
-        return json.loads(s)
-    except json.JSONDecodeError:
-        return json.loads(re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", s))
+    payload = loads_lenient(s)
+    if payload is None:
+        raise ValueError("no parseable JSON object in model reply")
+    return payload
 
 
 class LLMDistiller:
@@ -84,7 +82,6 @@ class LLMDistiller:
         self.chain = chain
 
     def distill(self, title: str, text: str, lang: str | None) -> Distillation:
-        import json
 
         from ..llm import run_complete
         from ..llm.prompts import DISTILL_SYSTEM, DISTILL_USER
@@ -136,5 +133,5 @@ class DistillerLadder:
 def get_distiller(config) -> Distiller:
     from ..llm import get_provider_chain
 
-    chain = get_provider_chain(config)
+    chain = get_provider_chain(config, task="distill")
     return DistillerLadder([LLMDistiller(chain), ExtractiveDistiller()])

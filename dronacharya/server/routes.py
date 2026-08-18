@@ -7,11 +7,11 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..ingest.distill import _lead_sentences
-from ..ingest.pipeline import preview_web, save_web
+from ..ingest.pipeline import preview_web
 from .app import open_repo
 
 router = APIRouter()
@@ -31,20 +31,22 @@ class SaveHtmlBody(SaveBody):
 
 
 class SearchBody(BaseModel):
-    query: str
-    k: int = 8
+    query: str = Field(max_length=2000)
+    k: int = Field(8, ge=1, le=50)
     tags: list[str] | None = None
+    show_all: bool = False   # include below-threshold weak matches
 
 
 class QueryBody(BaseModel):
-    question: str
+    question: str = Field(max_length=4000)
     mode: str = "kb"  # kb | deeper
-    k: Optional[int] = None
+    k: Optional[int] = Field(None, ge=1, le=50)
     tags: list[str] | None = None
 
 
 class AskBody(BaseModel):
-    question: str
+    question: str = Field(max_length=4000)
+    no_save: bool = False    # never store the answer, even high-confidence
 
 
 class AskSaveBody(BaseModel):
@@ -62,7 +64,7 @@ class PatchDocBody(BaseModel):
 
 
 class TodoBody(BaseModel):
-    text: str
+    text: str = Field(max_length=2000)
     due: str | None = None      # ISO datetime, or null for no reminder
 
 
@@ -79,12 +81,13 @@ class MindmapBody(BaseModel):
 
 
 class UnitsBody(BaseModel):
-    units: list[dict]     # [{text, kind?, heading_path?}] — full replacement list
+    # full replacement list [{text, kind?, heading_path?}]
+    units: list[dict] = Field(max_length=500)
 
 
 class GraphBody(BaseModel):
-    query: str
-    k: int = 12
+    query: str = Field(max_length=2000)
+    k: int = Field(12, ge=1, le=50)
     tags: list[str] | None = None
 
 
@@ -98,28 +101,10 @@ class TagNameBody(BaseModel):
 
 
 # --------------------------------------------------------------------- save
-import threading
+import threading  # noqa: E402 — section-local by design
 
-_COMMIT_LOCK = threading.Lock()  # serialize background commits (single-user scale;
-                                 # prevents two saves of the same URL racing the insert)
-
-
-_SAVE_ERRORS: dict[str, str] = {}   # url -> last background save failure
-
-
-def _background_commit(request: Request, url: str, html: str | None,
-                       title_hint: str, tags, note) -> None:
-    with _COMMIT_LOCK:
-        repo = open_repo(request)
-        try:
-            save_web(repo, request.app.state.embedder, request.app.state.config, url,
-                     html=html, title_hint=title_hint, tags=tags, note=note, overwrite=True)
-            _SAVE_ERRORS.pop(url, None)
-        except Exception as e:  # noqa: BLE001 — background failure must not crash the app
-            _SAVE_ERRORS[url] = str(e)[:300]
-            repo.log_event("save_background_error", {"url": url, "error": str(e)[:300]})
-        finally:
-            repo.close()
+_COMMIT_LOCK = threading.Lock()  # serializes quick-answer saves (jobs.py has
+                                 # its own work lock for queued save jobs)
 
 
 def _handle_save(request: Request, background: BackgroundTasks, url: str,
@@ -145,10 +130,14 @@ def _handle_save(request: Request, background: BackgroundTasks, url: str,
                 "new_preview": _lead_sentences(extracted.text),
                 "message": "page changed since it was saved — re-send with overwrite=true to update",
             }, status_code=409)
-        # accepted (or consented update): distill+embed+index in the background
-        _SAVE_ERRORS.pop(url, None)   # fresh attempt — drop any stale failure
-        background.add_task(_background_commit, request, url, html, title_hint,
-                            body.tags, body.note)
+        # accepted (or consented update): distill+embed+index via the durable
+        # job queue — state survives restarts, execution starts immediately
+        from .jobs import run_pending_jobs
+
+        repo.enqueue_job("save", url, {
+            "url": url, "html": html, "title_hint": title_hint,
+            "tags": body.tags, "note": body.note})
+        background.add_task(run_pending_jobs, request.app)
         return JSONResponse({"status": "accepted", "title": extracted.title,
                              "message": "saved — distilling in background"}, status_code=202)
     finally:
@@ -166,18 +155,8 @@ def save_html(request: Request, body: SaveHtmlBody, background: BackgroundTasks)
 
 
 # ------------------------------------------------------------------- search
-def _result_json(r) -> dict:
-    return {
-        "document_id": r.document.id,
-        "title": r.document.title,
-        "source_type": r.document.source_type,
-        "url": r.document.url,
-        "file_path": r.document.file_path,
-        "heading_path": r.unit.heading_path,
-        "kind": r.unit.kind,
-        "text": r.unit.text,
-        "score": r.score,
-    }
+from ..models import doc_capabilities as _doc_capabilities  # noqa: E402
+from ..search import result_to_json as _result_json  # noqa: E402
 
 
 @router.post("/search")
@@ -187,11 +166,20 @@ def search(request: Request, body: SearchBody):
 
     repo = open_repo(request)
     try:
+        from ..search import confidence_gate
+
+        config = request.app.state.config
+        reranker = get_reranker(config)
         results = hybrid_search(repo, request.app.state.embedder, body.query,
                                 top_k=body.k,
-                                candidates=request.app.state.config.retrieval.candidates,
-                                reranker=get_reranker(request.app.state.config),
+                                candidates=config.retrieval.candidates,
+                                reranker=reranker,
                                 tags=body.tags)
+        if not body.show_all:
+            # retrieval policy lives HERE, with the server's tuned config —
+            # not re-applied by each client against its own defaults
+            results = [r for r in results
+                       if r.score >= confidence_gate(config, reranker)]
         return {"results": [_result_json(r) for r in results]}
     finally:
         repo.close()
@@ -210,7 +198,7 @@ def ask(request: Request, body: AskBody):
         result = quick_ask(repo, request.app.state.embedder, config, body.question)
         saved = False
         if (result.mode == "web" and result.confidence == "high"
-                and result.save_payload):
+                and result.save_payload and not body.no_save):
             with _COMMIT_LOCK:
                 save_quick_answer(repo, request.app.state.embedder, config,
                                   body.question, result.save_payload,
@@ -232,6 +220,9 @@ def ask_save(request: Request, body: AskSaveBody):
     """Persist a user-vetted quick answer (stored as high confidence)."""
     from ..quick import save_quick_answer
 
+    if not str(body.payload.get("answer") or body.payload.get("command") or "").strip():
+        return JSONResponse({"detail": "payload needs a non-empty 'answer'"},
+                            status_code=400)
     repo = open_repo(request)
     try:
         with _COMMIT_LOCK:
@@ -256,13 +247,22 @@ def query(request: Request, body: QueryBody):
                                mode=body.mode, top_k=body.k, tags=body.tags)
             yield ("event: sources\ndata: "
                    + json.dumps([_result_json(r) for r in result.sources]) + "\n\n")
+            answer_parts: list[str] = []
+            error = ""
             if result.mode in ("no_answer", "no_provider"):
                 yield f"event: status\ndata: {result.mode}\n\n"
             else:
-                for chunk in result.chunks or []:
-                    yield "event: token\ndata: " + json.dumps(chunk) + "\n\n"
+                try:
+                    for chunk in result.chunks or []:
+                        answer_parts.append(chunk)
+                        yield "event: token\ndata: " + json.dumps(chunk) + "\n\n"
+                except Exception as e:  # noqa: BLE001 — provider died mid-stream
+                    error = str(e)[:200]
+            from ..rag import cited_indices
             yield ("event: done\ndata: "
-                   + json.dumps({"provider": result.provider, "mode": result.mode}) + "\n\n")
+                   + json.dumps({"provider": result.provider, "mode": result.mode,
+                                 "cited": cited_indices("".join(answer_parts)),
+                                 "error": error}) + "\n\n")
         finally:
             repo.close()
 
@@ -352,6 +352,7 @@ def graph(request: Request, body: GraphBody):
 @router.get("/documents")
 def list_documents(request: Request, tag: str | None = None, type: str | None = None,
                    limit: int = 50, offset: int = 0):
+    limit, offset = min(max(limit, 1), 500), max(offset, 0)
     repo = open_repo(request)
     try:
         docs = repo.list_documents(source_type=type, tag=tag, limit=limit, offset=offset)
@@ -362,6 +363,7 @@ def list_documents(request: Request, tag: str | None = None, type: str | None = 
             "created_at": d.created_at, "updated_at": d.updated_at,
             "tags": repo.get_tags(d.id),
             "tag_nodes": (d.meta or {}).get("tag_nodes") or None,
+            "capabilities": _doc_capabilities(d.source_type),
         } for d in docs]}
     finally:
         repo.close()
@@ -374,15 +376,21 @@ def lookup_document(request: Request, url: str):
     repo = open_repo(request)
     try:
         doc = repo.get_document_by_url(url)
+        state, error = repo.job_state_for_key("save", url)
         if doc is None:
-            if url in _SAVE_ERRORS:
+            if state == "error":
                 # the background distill+commit died — tell the client instead
                 # of letting it poll forever
                 return JSONResponse({"detail": "background save failed",
-                                     "error": _SAVE_ERRORS[url]}, status_code=502)
+                                     "error": error}, status_code=502)
+            if state == "pending":
+                return JSONResponse({"status": "distilling"}, status_code=202)
             return JSONResponse({"detail": "not found"}, status_code=404)
+        # pending=True while an overwrite re-distill is still running: the doc
+        # on disk is the STALE version — clients must not present it as fresh
         return {"id": doc.id, "title": doc.title, "summary": doc.summary,
-                "distilled": doc.distilled, "tags": repo.get_tags(doc.id)}
+                "distilled": doc.distilled, "pending": state == "pending",
+                "tags": repo.get_tags(doc.id)}
     finally:
         repo.close()
 
@@ -404,6 +412,7 @@ def get_document(request: Request, document_id: str):
             "file_path": doc.file_path, "source_type": doc.source_type,
             "summary": doc.summary, "saved_note": doc.saved_note,
             "distilled": doc.distilled, "tags": repo.get_tags(doc.id),
+            "capabilities": _doc_capabilities(doc.source_type),
             "units": [{"seq": u.seq, "kind": u.kind,
                        "heading_path": u.heading_path, "text": u.text}
                       for u in units],
@@ -431,10 +440,11 @@ def put_units(request: Request, document_id: str, body: UnitsBody):
             doc = repo.get_document(document_id)
             if doc is None:
                 return JSONResponse({"detail": "not found"}, status_code=404)
-            if doc.source_type == "mindmap":
+            caps = _doc_capabilities(doc.source_type)
+            if not caps["editable_units"]:
                 return JSONResponse(
-                    {"detail": "mind-map knowledge is edited in the mind map"},
-                    status_code=400)
+                    {"detail": f"this knowledge is edited in its own editor "
+                               f"({caps['editor']})"}, status_code=400)
             units = [KnowledgeUnit(
                 document_id=document_id, seq=i,
                 text=str(u["text"]).strip(),
@@ -633,13 +643,57 @@ def export(request: Request):
         repo.close()
 
 
-@router.delete("/data")
-def wipe(request: Request):
+class TokenCreateBody(BaseModel):
+    name: str = Field(max_length=80)
+    scopes: list[str] = Field(default_factory=lambda: ["read", "write"])
+
+
+@router.post("/tokens")
+def create_token(request: Request, body: TokenCreateBody):
+    """Mint a scoped per-device token (admin only — enforced in middleware).
+    The plaintext appears in THIS response only; the server stores a hash."""
+    allowed = {"read", "write", "admin"}
+    scopes = [sc for sc in body.scopes if sc in allowed]
+    if not scopes:
+        return JSONResponse({"detail": "scopes must be a subset of "
+                             "read/write/admin"}, status_code=400)
     repo = open_repo(request)
     try:
-        n = repo.wipe()
-        repo.log_event("wipe", {"via": "api", "documents": n})
-        return {"status": "wiped", "documents": n}
+        token_id, plaintext = repo.create_token(body.name, scopes)
+        return {"id": token_id, "name": body.name, "scopes": scopes,
+                "token": plaintext}
+    finally:
+        repo.close()
+
+
+@router.get("/tokens")
+def list_tokens(request: Request):
+    repo = open_repo(request)
+    try:
+        return {"tokens": repo.list_tokens()}
+    finally:
+        repo.close()
+
+
+@router.delete("/tokens/{token_id}")
+def revoke_token(request: Request, token_id: int):
+    repo = open_repo(request)
+    try:
+        if not repo.revoke_token(token_id):
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        return {"status": "revoked", "id": token_id}
+    finally:
+        repo.close()
+
+
+@router.delete("/data")
+def wipe(request: Request, factory: bool = False):
+    repo = open_repo(request)
+    try:
+        n = repo.wipe(factory=factory)
+        if not factory:
+            repo.log_event("wipe", {"via": "api", "documents": n})
+        return {"status": "wiped", "documents": n, "factory": factory}
     finally:
         repo.close()
 
@@ -675,7 +729,8 @@ def sync_push(request: Request, body: PushBody, background: BackgroundTasks):
     repo = open_repo(request)
     try:
         summary = apply_ops(repo, body.ops, origin=f"remote:{body.device_id}",
-                            prefer_local_on_tie=True)
+                            prefer_local_on_tie=True,
+                            embedder=request.app.state.embedder)
         repo.device_update(body.device_id, name=f"device:{body.device_id[:8]}")
         undistilled = [op["doc"]["id"] for op in body.ops
                        if op.get("op") == "upsert" and not op["doc"].get("distilled")]

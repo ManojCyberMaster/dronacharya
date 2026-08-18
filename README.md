@@ -4,8 +4,8 @@
 
 - Purely **personal** knowledge management — no teams, no sharing, by design.
 - Runs on **macOS, Linux, Windows, or WSL**. Works standalone on a laptop; optionally against your own home server for heavier models.
-- **Copyright-conscious**: only the single page you save is ever fetched (no crawling); only distilled knowledge is stored, never the original page content; answers always link back to the source.
-- **Your data, your rights**: full export (`dc export`), full deletion (`dc wipe`), basic PII filter at ingest.
+- **Copyright-conscious**: only the single page you save is ever fetched (no crawling). Raw HTML is never persisted; with an LLM configured, distilled knowledge (your-words facts) is stored — in no-model fallback mode, attributable source excerpts are stored until `dc redistill` upgrades them. Answers always link back to the source.
+- **Your data, your rights**: full export incl. the operational log (`dc export`, `--format obsidian` for a Markdown vault), deletion that propagates to synced devices (`dc wipe`) or erases everything local (`--factory`), scoped API tokens (`dc token`), per-task privacy policies (`[privacy] local-only`), and a basic PII filter at ingest — see [SECURITY.md](SECURITY.md) and [docs/concepts/privacy.md](docs/concepts/privacy.md).
 - LLM answers via **your** providers: Anthropic/OpenAI API keys or your own Ollama/vLLM endpoint. None are mandatory for capture and search.
 
 ## Quick start
@@ -13,7 +13,7 @@
 ```bash
 pip install -e .
 dc init                      # config + knowledge base + embedding model
-dc seed install cli-essentials.dckit.json   # optional starter knowledge (see below)
+dc seed build seedkits/cli-essentials.toml && dc seed install cli-essentials.dckit.json   # optional starter knowledge
 dc save https://example.com/article --tag reading
 dc add ~/Documents/report.docx --tag work    # local files: pdf/docx/xlsx/pptx/md/txt
 dc sync-notes                # after adding note directories to the config
@@ -21,7 +21,7 @@ dc search "that thing I read about chunking"
 dc "command line for mounting local windows drive in wsl"   # quick answer
 ```
 
-See [docs/install.md](docs/install.md) for per-OS install (Windows, Linux, WSL, macOS).
+See [docs/install.md](docs/install.md) for per-OS install (Windows, Linux, WSL, macOS). `dc doctor` diagnoses a setup end-to-end: config, models, providers, server link.
 
 ## Quick answers: `dc "<question>"`
 
@@ -29,8 +29,8 @@ Any argument that isn't a subcommand is a question. The answer is deliberately
 minimal — for command questions, the command line plus one usage example;
 otherwise a sentence or two. If your KB doesn't know, `dc` falls back to the
 internet and embeds the qualified answer back into your KB so the next ask is
-instant and offline. Trust is earned, not claimed: answers auto-save only when
-grounded on real fetched pages (your own SearxNG, or a web-capable provider).
+instant and offline. Trust is earned, not claimed ([how confidence works](docs/concepts/trust-and-confidence.md)): answers auto-save only when
+grounded on real fetched pages AND the cited page verifiably supports the claim.
 An answer that can't be verified is not shown at all — `dc` says "No verified
 answer" and points you at `dc query "…" --deeper` (full model answer, clearly
 labeled) or `--guess` (show the unverified quick answer; it then asks before

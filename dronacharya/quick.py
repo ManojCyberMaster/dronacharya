@@ -48,12 +48,10 @@ def _kb_context(sources) -> str:
 
 
 def _parse_web_json(raw: str) -> dict | None:
-    start, end = raw.find("{"), raw.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        payload = json.loads(raw[start:end + 1])
-    except json.JSONDecodeError:
+    from .llm import loads_lenient
+
+    payload = loads_lenient(raw)   # repairs the \* escapes shell answers love
+    if payload is None:
         return None
     if "answer" not in payload and "command" not in payload:
         return None
@@ -69,7 +67,7 @@ def _searx_pages(config: Config, question: str) -> list[tuple[str, str]]:
     import urllib.request
 
     from .ingest import extract as extract_mod
-    from .ingest.fetch import fetch_page
+    from .ingest.fetch import allow_private_urls, fetch_page
 
     base = config.websearch.searx_url.rstrip("/")
     q = urllib.parse.urlencode({"q": question, "format": "json", "language": "en"})
@@ -84,7 +82,8 @@ def _searx_pages(config: Config, question: str) -> list[tuple[str, str]]:
         url = hit.get("url", "")
         if not url:
             continue
-        html, err = fetch_page(url, timeout=20)
+        html, err = fetch_page(url, timeout=20,
+                               allow_private=allow_private_urls(config))
         if err:
             continue
         extracted = extract_mod.from_html(html, url=url)
@@ -93,18 +92,48 @@ def _searx_pages(config: Config, question: str) -> list[tuple[str, str]]:
     return pages
 
 
+def _answer_supported(config, answer: str, pages: list[tuple[str, str]],
+                      cited_url: str) -> bool | None:
+    """Claim-to-passage verification: does the cited page actually SUPPORT the
+    answer text? Scored by the cross-encoder (the same model that reranks
+    search). None = can't verify (no reranker available) — caller keeps the
+    weaker URL-membership grounding. Threshold is deliberately permissive
+    (terse command answers vs prose pages score lower than QA pairs)."""
+    import math
+
+    from .reranker import get_reranker
+
+    reranker = get_reranker(config)
+    if reranker is None or not answer.strip():
+        return None
+    texts = [t for u, t in pages if u == cited_url] or [t for _, t in pages]
+    if not texts:
+        return None
+    try:
+        model = reranker._load()
+        # best-supporting window of the cited page
+        windows = [texts[0][i:i + 1500] for i in range(0, min(len(texts[0]), 6000), 1500)]
+        scores = model.predict([(answer, w) for w in windows if w.strip()])
+        support = max(1.0 / (1.0 + math.exp(-float(x))) for x in scores)
+    except Exception:  # noqa: BLE001 — verification must never break answering
+        return None
+    return support >= 0.05
+
+
 def quick_ask(
     repo, embedder: Embedder, config: Config, question: str, *,
     chain=None, web_chain=None, verify_fetch=None,
 ) -> QuickResult:
     from .reranker import get_reranker
 
+    reranker = get_reranker(config)
     sources = hybrid_search(
         repo, embedder, question, top_k=6,
-        candidates=config.retrieval.candidates, reranker=get_reranker(config),
+        candidates=config.retrieval.candidates, reranker=reranker,
     )
-    confident = bool(sources) and sources[0].score >= config.retrieval.min_confidence
-    chain = chain if chain is not None else get_provider_chain(config)
+    from .search import confidence_gate
+    confident = bool(sources) and sources[0].score >= confidence_gate(config, reranker)
+    chain = chain if chain is not None else get_provider_chain(config, task="answer")
 
     if confident:
         try:
@@ -180,12 +209,25 @@ def quick_ask(
     source_url = str(payload.get("source_url", "")).strip()
     confidence = payload.get("confidence", "low")
     grounded = bool(searx_urls) and source_url in searx_urls
+    if grounded and confidence == "high":
+        # grounding proves the page was FETCHED; verification asks whether it
+        # actually supports the claim before "high" is allowed to stand
+        supported = _answer_supported(config, answer_text, pages, source_url)
+        if supported is False:
+            repo.log_event("quick_unsupported_demoted",
+                           {"q": question[:200], "url": source_url})
+            confidence = "low"
     if source_url and not grounded:
         # Providers without web access invent plausible doc URLs — drop a
         # cited source that doesn't actually exist rather than show it.
         # (Searx-grounded sources were fetched already — no second fetch.)
         if verify_fetch is None:
-            from .ingest.fetch import fetch_page as verify_fetch
+            from .ingest.fetch import allow_private_urls, fetch_page
+
+            _ap = allow_private_urls(config)
+
+            def verify_fetch(u, timeout=15, _ap=_ap):
+                return fetch_page(u, timeout=timeout, allow_private=_ap)
         _, fetch_err = verify_fetch(source_url, timeout=15)
         if fetch_err:
             repo.log_event("quick_source_unverified",
@@ -222,7 +264,9 @@ def save_quick_answer(
     url = source_url
     if url and repo.get_document_by_url(url):
         url = None  # source page already saved — keep the Q&A, avoid URL clash
-    text = payload.get("answer") or payload["command"]  # "command": pre-2026-08 key
+    text = payload.get("answer") or payload.get("command")  # "command": pre-2026-08 key
+    if not str(text or "").strip():
+        raise ValueError("quick-answer payload has no answer text")
     if payload.get("example"):
         text += f"\ne.g. {payload['example']}"
     if payload.get("summary"):

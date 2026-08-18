@@ -27,8 +27,8 @@ dc seed install https://example.com/kits/cli-essentials.dckit.json
 ```
 
 Installation never overwrites your knowledge: URLs already in your KB are
-skipped. Seeded documents are tagged `seed/<topic>` (e.g. `seed/wsl`,
-`seed/linux/alpine`, `seed/windows/powershell`) so you can filter or bulk-
+skipped. Seeded documents are tagged with their plain topic (e.g. `wsl`,
+`linux/alpine`, `windows/powershell`) so you can filter or bulk-
 manage them, and carry `meta.seed_kit` for provenance.
 
 ## Building a kit
@@ -58,7 +58,7 @@ dc seed build seedkits/cli-essentials.toml -o cli-essentials.dckit.json \
 
 ```toml
 [[source]]
-topic = "wsl"                          # becomes tag "seed/wsl"
+topic = "wsl"                          # becomes the tag "wsl"
 title = "Mount a Windows drive in WSL"
 url = "https://learn.microsoft.com/en-us/windows/wsl/filesystems"
 license = "CC BY 4.0"

@@ -7,9 +7,11 @@ const questionInput = document.getElementById("question");
 function sourceLine(s, i) {
   const origin = s.url || s.file_path || "";
   const a = document.createElement("a");
+  const editor = s.capabilities ? s.capabilities.editor
+    : (s.source_type === "mindmap" ? "mindmap" : null);   // pre-capabilities servers
   if (s.url) { a.href = s.url; a.target = "_blank"; a.rel = "noopener"; }
-  else if (s.source_type === "mindmap") { a.href = "/mindmap"; }
-  const title = (s.source_type === "mindmap" ? "MindMap: " : "") + s.title;
+  else if (editor) { a.href = "/" + (editor === "todo" ? "todos" : editor); }
+  const title = (editor === "mindmap" ? "MindMap: " : "") + s.title;
   a.textContent = `[${i + 1}] ${title}${s.heading_path ? " · " + s.heading_path : ""}${origin ? " — " + origin : ""}`;
   return a;
 }
@@ -88,8 +90,11 @@ async function ask(mode) {
   const decoder = new TextDecoder();
   let buffer = "";
   let pendingSources = [];
+  let gotDone = false;
   while (true) {
-    const { done, value } = await reader.read();
+    let done, value;
+    try { ({ done, value } = await reader.read()); }
+    catch (e) { break; }                       // connection dropped mid-stream
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let idx;
@@ -107,17 +112,24 @@ async function ask(mode) {
           : "No LLM provider available — configure one in config.toml. Search still works in the Library.";
       } else if (event === "done") {
         const info = JSON.parse(data);
+        gotDone = true;
         if (info.provider) footerEl.textContent = "answered by " + info.provider;
-        // only list sources the answer actually cited — an uncited retrieval
-        // candidate (esp. in deeper mode) was context the model rejected
-        const cited = new Set([...answerEl.textContent.matchAll(/\[(\d{1,2})\]/g)]
-          .map((m) => parseInt(m[1], 10)));
+        if (info.error) footerEl.textContent += " · answer was cut short (" + info.error + ")";
+        // only list sources the answer actually cited — the SERVER computes
+        // the cited set (single source of truth for every client)
+        const cited = new Set(info.cited || []);
         pendingSources.forEach((s, i) => {
           if (cited.has(i + 1) || (mode !== "deeper" && cited.size === 0))
             sourcesEl.appendChild(sourceLine(s, i));
         });
       }
     }
+  }
+  if (!gotDone) {
+    // stream died before `done`: never leave a partial answer unattributed
+    footerEl.textContent = "connection lost mid-answer";
+    if (!sourcesEl.childElementCount)
+      pendingSources.forEach((s, i) => sourcesEl.appendChild(sourceLine(s, i)));
   }
 }
 

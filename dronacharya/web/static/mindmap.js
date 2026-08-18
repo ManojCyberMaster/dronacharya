@@ -313,20 +313,31 @@ function initMind(data) {
   window.addEventListener("pointerup", () => { altPan = null; }, true);
 }
 
+let saveInFlight = false;
 async function saveNow() {
   if (!mind || !dirty) return;
+  if (saveInFlight) return;   // markDirty's timer re-fires after we finish
+  saveInFlight = true;
   dirty = false;
   const data = mind.getData();
   data.dcTheme = themeKey;
   data.direction = mind.direction;
   data.dcTag = mind.dcTag || "";
   setStatus("saving…");
-  const resp = await fetch(
-    currentId ? `/api/v1/mindmaps/${currentId}` : "/api/v1/mindmaps",
-    { method: currentId ? "PUT" : "POST", headers: headers(),
-      body: JSON.stringify({ data }) });
+  let resp;
+  try {
+    resp = await fetch(
+      currentId ? `/api/v1/mindmaps/${currentId}` : "/api/v1/mindmaps",
+      { method: currentId ? "PUT" : "POST", headers: headers(),
+        body: JSON.stringify({ data }) });
+  } catch (e) {
+    dirty = true; setStatus("save failed — offline?"); return;
+  } finally {
+    saveInFlight = false;   // without this, one network error bricks autosave
+  }
   if (!resp.ok) { setStatus("save failed — check token"); dirty = true; return; }
   const out = await resp.json();
+  if (dirty) setTimeout(saveNow, 300);   // edits made while the POST ran
   const isNew = !currentId;
   currentId = out.id;
   setStatus("saved ✓ (in your knowledge base)");

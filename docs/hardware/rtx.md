@@ -31,9 +31,11 @@ Cloud providers keep working as fallback — nothing is replaced.
 
 ## Notes
 
-- PyTorch will use your GPU for embeddings and the reranker automatically when
-  installed with CUDA support (`pip install torch` default wheels on Windows/Linux).
-- `rerank = "auto"` turns the cross-encoder on when CUDA is present — noticeably
-  better "find that reference" precision.
+- The default install pins CPU-only torch wheels (small, universal). For GPU
+  embeddings/reranking install the CUDA build explicitly:
+  `uv pip install torch --index-url https://download.pytorch.org/whl/cu126`
+  — `dc doctor` shows whether CUDA is actually in use.
+- Reranking now defaults to `"on"` (the cross-encoder is small enough for
+  CPU); with the CUDA torch build it simply runs faster.
 - Quality expectation: 8–14B models distill and answer well; for the hardest
   questions keep a cloud provider later in `provider_order` and use `--deeper`.

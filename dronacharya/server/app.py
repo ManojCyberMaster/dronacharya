@@ -39,7 +39,8 @@ class LockedEmbedder:
 
 def create_app(config: Config | None = None) -> FastAPI:
     config = config or load_config()
-    app = FastAPI(title="DronaCharya", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="DronaCharya", docs_url="/api/v1/docs", redoc_url=None,
+                  openapi_url="/api/v1/openapi.json")
     app.state.config = config
     app.state.embedder = LockedEmbedder(get_embedder(config))
     app.state.db_path = db_path()
@@ -51,19 +52,61 @@ def create_app(config: Config | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    MAX_BODY = 12 * 1024 * 1024   # rendered pages fit; nothing needs more
+
+    @app.middleware("http")
+    async def hardening(request: Request, call_next):
+        try:
+            if int(request.headers.get("content-length") or 0) > MAX_BODY:
+                return JSONResponse({"detail": "request body too large"},
+                                    status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "bad content-length"}, status_code=400)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
+    # POST endpoints that only READ; everything else non-GET needs "write"
+    READ_POSTS = {"/api/v1/search", "/api/v1/query", "/api/v1/ask",
+                  "/api/v1/graph"}
+    # destructive / whole-KB endpoints need "admin"
+    ADMIN_PREFIXES = ("/api/v1/export", "/api/v1/data", "/api/v1/tokens")
+
     @app.middleware("http")
     async def auth(request: Request, call_next):
         path = request.url.path
         exempt = (
             not path.startswith("/api/")
-            or path == "/api/v1/status"
+            or path in ("/api/v1/status", "/api/v1/docs", "/api/v1/openapi.json")
             or request.method == "OPTIONS"
         )
         token = config.server.token
         if not exempt and token:
             header = request.headers.get("authorization", "")
-            if header != f"Bearer {token}":
-                return JSONResponse({"detail": "invalid or missing token"}, status_code=401)
+            presented = header.removeprefix("Bearer ").strip()
+            if presented == token:
+                scopes = ["read", "write", "admin"]   # config token = admin
+            else:
+                repo = open_repo(app)
+                try:
+                    scopes = repo.verify_token(presented)
+                finally:
+                    repo.close()
+                if scopes is None:
+                    return JSONResponse({"detail": "invalid or missing token"},
+                                        status_code=401)
+            request.state.scopes = scopes
+            needs = "read"
+            if path.startswith(ADMIN_PREFIXES):
+                needs = "admin"
+            elif request.method != "GET" and path not in READ_POSTS:
+                needs = "write"
+            if needs not in scopes:
+                return JSONResponse(
+                    {"detail": f"token lacks the '{needs}' scope"},
+                    status_code=403)
         return await call_next(request)
 
     from .routes import router

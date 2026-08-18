@@ -30,14 +30,12 @@ What you get at this tier:
 - Library, tags word map, mind maps, knowledge graph, to-dos, export, sync.
 - No LLM answers yet: `dc "question"` will tell you no provider is available.
 
-Recommended on CPU:
+Reranking is **on by default** (the cross-encoder is small enough for CPU)
+— it is what lets search honestly say "No" instead of listing weak keyword
+matches. Check the whole setup any time with:
 
-```toml
-# ~/.dronacharya/config.toml
-[retrieval]
-rerank = "on"        # the reranker is small enough for CPU (~1s per search)
-                     # and is what lets search honestly say "No" instead of
-                     # listing weak keyword matches
+```bash
+dc doctor            # config, models, providers, server link — names what's broken
 ```
 
 **Privacy at this tier: nothing ever leaves your machine.**
@@ -109,9 +107,17 @@ provider_order = ["ollama", "anthropic", "openai"]   # local first, cloud as fal
 | `dc query --deeper` | Your question + weak KB context (clearly bannered as outside-KB) |
 | Everything else | **Nothing.** Search, embeddings, reranking, library, tags, graph, sync are all local |
 
-If a page is too sensitive to send anywhere, save it while only local
-providers are configured — the provider chain is per-machine configuration,
-not per-save.
+If a page is too sensitive to send anywhere, make it *impossible* rather
+than remembering not to:
+
+```toml
+[privacy]
+distill = "local-only"     # page text can never reach a cloud API — cloud
+                           # providers are removed from that task's chain
+[llm]
+distill_providers = ["ollama"]   # optional: small local model distills,
+                                 # big models still answer
+```
 
 ## Multi-device (optional)
 
@@ -127,9 +133,17 @@ remote_url = "http://<server-host>:8317"
 token = "<token from the server's config.toml>"
 ```
 
-`dc sync` reconciles: deletions win, conflicts keep the losing version for
-review (`dc conflicts`), weak offline saves get upgraded by the server's
-model.
+`dc sync` reconciles (and runs automatically after saves when `[sync]
+auto` is on): deletions win, conflicts resolve by per-document version
+counters (clock-skew safe) with the losing version kept for review
+(`dc conflicts`), weak offline saves get upgraded by the server's model.
+Sync ships text only — each device re-embeds locally.
+
+Give each device its own **scoped token** instead of sharing the admin one:
+
+```bash
+dc token create laptop --scopes read,write    # printed once; revocable
+```
 
 ## Browser extension
 
@@ -138,8 +152,10 @@ model.
 2. Popup → Settings → server URL + token. A non-localhost URL triggers a
    one-time host-permission prompt — that's the extension asking for exactly
    your server's origin, nothing else.
-3. Save any page: an in-page panel shows distillation progress, then the
-   distilled summary + knowledge items to review (edit, remove, or discard).
+3. Save any page: for a non-localhost server a consent panel first shows
+   what will be sent and where; then the in-page panel shows distillation
+   progress and the distilled summary + knowledge items to review (edit,
+   remove, or discard).
 
 ---
 
@@ -190,9 +206,23 @@ clearly-labeled model answer, `--guess` to see the unverified quick answer, or
 set up SearxNG so fallback answers get grounded (and can be high-confidence).
 
 **`dc search` says "No." but I think it should match.**
-Below-threshold results are hidden on purpose; `--all` shows them. On CPU,
-set `rerank = "on"` — without the reranker there is no reliable confidence
-signal and the gate can misfire in both directions.
+Below-threshold results are hidden on purpose; `--all` shows them. The
+threshold (`retrieval.min_relevance`, reranked-probability scale) is tuned
+against the golden eval set — if you change it, run
+`DC_RUN_EVALS=1 pytest tests/test_eval_retrieval.py`. Never disable
+reranking if you care about honest refusals.
+
+**"embedding model changed … run `dc reembed`".**
+A KB is bound to one embedding model (mixing vectors corrupts search). You
+changed `[embeddings]`; `dc reembed` rebuilds the index and re-stamps the
+fingerprint. Each synced device re-embeds for itself — sync never ships
+vectors.
+
+**What's the difference between `dc wipe` and `dc wipe --factory`?**
+Plain wipe deletes all knowledge and keeps sync tombstones so the deletion
+propagates to your other devices. `--factory` also erases the event log,
+sync history, and device registrations on this machine — local-only by
+design.
 
 **Sources listed that have nothing to do with the answer.**
 Retrieval matches keywords too ("how to make X" can match *make(1)* docs).
