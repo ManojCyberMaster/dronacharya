@@ -299,6 +299,119 @@
     return { hide };
   }
 
+  // XlsxParser stores each row as tab-separated text (first row = header) —
+  // as plain escaped text those columns never line up. Detect that shape
+  // and render a real table instead; anything else displays as before.
+  function textAsGridRows(text) {
+    const lines = (text || "").split("\n").filter(l => l.trim() !== "");
+    const rows = lines.map(l => l.split("\t"));
+    const looksLikeTable = rows.length >= 2 && rows[0].length > 1
+      && rows.every(r => r.length === rows[0].length);
+    return looksLikeTable ? rows : null;
+  }
+
+  function renderUnitTextHtml(text) {
+    const rows = textAsGridRows(text);
+    if (!rows) return `<div class="u-text">${esc(text)}</div>`;
+    const [header, ...body] = rows;
+    const thead = `<tr>${header.map(c => `<th>${esc(c)}</th>`).join("")}</tr>`;
+    const tbody = body.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("");
+    return `<div class="u-table-wrap"><table class="u-table">`
+      + `<thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
+  }
+
+  // Editable spreadsheet grid for table-shaped units (XLSX sections): every
+  // cell is a real <input> (native tab/arrow navigation, no HTML-injection
+  // risk since we only ever read .value); the first row is a real header
+  // (its own labeled/editable row, separate from data), rows/columns can
+  // be added or removed. .getGridValue() serializes back to the SAME
+  // tab-separated shape XlsxParser stores, so search/FTS keeps working.
+  function buildEditableGrid(text) {
+    const [headerRow, ...dataRows] = textAsGridRows(text) || [[text || ""]];
+    const wrap = document.createElement("div");
+    wrap.className = "u-grid-wrap";
+    const table = document.createElement("table");
+    table.className = "u-grid";
+    const thead = document.createElement("thead");
+    const theadRow = document.createElement("tr");
+    const tbody = document.createElement("tbody");
+
+    const cellInput = (value) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = value;
+      return input;
+    };
+    const colCount = () => Math.max(theadRow.children.length - 1, 0);
+    const removeColumn = (ci) => {
+      theadRow.deleteCell(ci);
+      [...tbody.rows].forEach((tr) => tr.deleteCell(ci));
+    };
+    const addHeaderCell = (value) => {
+      const th = document.createElement("th");
+      th.appendChild(cellInput(value));
+      const del = document.createElement("button");
+      del.className = "ghost icon u-grid-colctl"; del.type = "button";
+      del.textContent = "✕"; del.title = "remove column";
+      del.onclick = () => removeColumn([...theadRow.children].indexOf(th));
+      th.appendChild(del);
+      theadRow.insertBefore(th, theadRow.lastElementChild);
+    };
+    const addDataRow = (values) => {
+      const tr = document.createElement("tr");
+      values.forEach((v) => {
+        const td = document.createElement("td");
+        td.appendChild(cellInput(v));
+        tr.appendChild(td);
+      });
+      const ctl = document.createElement("td");
+      ctl.className = "u-grid-rowctl";
+      const del = document.createElement("button");
+      del.className = "ghost icon"; del.type = "button";
+      del.textContent = "✕"; del.title = "remove row";
+      del.onclick = () => tr.remove();
+      ctl.appendChild(del);
+      tr.appendChild(ctl);
+      tbody.appendChild(tr);
+      return tr;
+    };
+    const addColumn = () => {
+      addHeaderCell("");
+      [...tbody.rows].forEach((tr) => {
+        const td = document.createElement("td");
+        td.appendChild(cellInput(""));
+        tr.insertBefore(td, tr.lastElementChild);
+      });
+    };
+
+    theadRow.appendChild(document.createElement("th"));   // spacer above the row-delete column
+    headerRow.forEach((v) => addHeaderCell(v));
+    thead.appendChild(theadRow);
+    dataRows.forEach((r) => addDataRow(r));
+
+    table.append(thead, tbody);
+    const controls = document.createElement("div");
+    controls.className = "row u-grid-controls";
+    const addRowBtn = document.createElement("button");
+    addRowBtn.className = "secondary"; addRowBtn.type = "button";
+    addRowBtn.textContent = "+ Row";
+    addRowBtn.onclick = () => addDataRow(Array(colCount()).fill(""));
+    const addColBtn = document.createElement("button");
+    addColBtn.className = "secondary"; addColBtn.type = "button";
+    addColBtn.textContent = "+ Column";
+    addColBtn.onclick = addColumn;
+    controls.append(addRowBtn, addColBtn);
+    wrap.append(table, controls);
+
+    wrap.getGridValue = () => {
+      const header = [...theadRow.querySelectorAll("input")].map((i) => i.value).join("\t");
+      const data = [...tbody.rows].map((tr) =>
+        [...tr.querySelectorAll("input")].map((i) => i.value).join("\t"));
+      return [header, ...data].filter((line) => line.trim() !== "").join("\n");
+    };
+    return wrap;
+  }
+
   // ------------------------------------------------- document view/editor --
   // Shows a document with its knowledge units; units are editable/deletable
   // (mind maps redirect to the editor). Used by Library and Tags pages.
@@ -321,9 +434,10 @@
         <span class="badge plain">${esc(doc.source_type)}</span>
         <span id="dv-tags"></span>
         <span class="doc-actions">
-          ${doc.file_path ? `<button class="ghost" id="dv-convert"
-             title="Make this file's content directly editable, like a note">
-             Convert to note</button>` : ""}
+          ${doc.file_path ? `<button class="ghost" id="dv-convert" title="${esc(
+             "Sections are separate fields right now. This merges them into a single "
+             + "document you can freely rewrite, reorder, or reformat — instead of "
+             + "fixing one field at a time.")}">Edit as one document</button>` : ""}
           <button class="danger" id="dv-del">Delete document</button></span>
       </div>
       ${origin ? `<div class="muted" style="margin-bottom:8px">${
@@ -437,22 +551,36 @@
               <button class="ghost icon" title="edit">✎</button>
               <button class="ghost icon" title="remove">✕</button></span>` : ""}
           </div>
-          <div class="u-text">${esc(u.text)}</div>`;
+          ${renderUnitTextHtml(u.text)}`;
         if (editable) {
           const [editBtn, delBtn] = el.querySelectorAll(".u-tools button");
           editBtn.onclick = () => {
-            const area = document.createElement("textarea");
-            area.value = u.text;
+            const textBlock = el.querySelector(".u-text, .u-table-wrap");
+            const originalHeight = textBlock.getBoundingClientRect().height;
+            const isGrid = textAsGridRows(u.text) !== null;
+            let editEl;
+            if (isGrid) {
+              editEl = buildEditableGrid(u.text);
+            } else {
+              editEl = document.createElement("textarea");
+              editEl.className = "u-editarea";
+              editEl.value = u.text;
+              editEl.style.height = Math.max(originalHeight, 120) + "px";
+            }
             const bar = document.createElement("div");
             bar.className = "row";
             bar.style.marginTop = "8px";
             bar.innerHTML = `<button>Save</button>
                              <button class="secondary">Cancel</button>`;
-            el.querySelector(".u-text").replaceWith(area);
+            textBlock.replaceWith(editEl);
             el.appendChild(bar);
-            area.focus();
+            if (!isGrid) editEl.focus();
             bar.children[0].onclick = async () => {
-              const text = area.value.trim();
+              // .trim() only makes sense for free text — on grid data it
+              // silently eats a legitimately empty LAST cell (trailing tab
+              // on the final row), since trim only touches the very ends
+              // of the whole string, not each line.
+              const text = isGrid ? editEl.getGridValue() : editEl.value.trim();
               if (!text) return;
               const prev = u.text;
               u.text = text;
@@ -475,7 +603,10 @@
         unitsEl.appendChild(el);
       });
     }
-    renderUnits();
+    // note/todo/mindmap already rendered their own message/button above —
+    // dumping every raw unit into #dv-units too made "Edit note" sit on
+    // top of a full section list instead of replacing it.
+    if (editable) renderUnits();
 
     wrap.querySelector("#dv-del").onclick = async () => {
       if (!confirm(`Delete "${doc.title}" and all its knowledge?`)) return;
@@ -485,8 +616,8 @@
     };
     const convertBtn = wrap.querySelector("#dv-convert");
     if (convertBtn) convertBtn.onclick = async () => {
-      if (!confirm(`Convert "${doc.title}" to a note? You'll be able to edit it `
-                   + "directly from now on — re-uploading the original file will "
+      if (!confirm(`Edit "${doc.title}" as one document? Its sections merge into a `
+                   + "single free-form note — re-uploading the original file will "
                    + "no longer update it."))
         return;
       const r = await fetch(`/api/v1/documents/${id}/convert-to-note`,

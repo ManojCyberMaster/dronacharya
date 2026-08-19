@@ -191,11 +191,15 @@ def convert_to_note(repo, embedder, document_id: str) -> Document:
     if not markdown.strip():
         raise ValueError("nothing to convert — document has no content")
     original_type = doc.source_type
+    # keep the origin visible as a tag (e.g. "tdl") even though the badge
+    # now correctly says "note" — the type change shouldn't erase where
+    # this knowledge actually came from.
+    tags = sorted({*repo.get_tags(document_id), original_type})
     doc.source_type = SourceType.NOTE
     doc.file_path = None   # stop claiming the original path — a future
     doc.url = None          # re-upload/re-save must not collide with this note
     doc.meta = {**(doc.meta or {}), "converted_from": original_type}
     doc = _build(repo, embedder, doc, title=doc.title or "", content=markdown,
-                fmt="markdown", tags=repo.get_tags(document_id), is_new=False)
+                fmt="markdown", tags=tags, is_new=False)
     repo.log_event("note_converted", {"document_id": doc.id, "from": original_type})
     return doc

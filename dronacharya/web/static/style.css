@@ -338,6 +338,32 @@ code {
 .unit .u-tools { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .unit:hover .u-tools { opacity: 1; }
 .unit .u-tools button { padding: 2px 7px; font-size: 12px; }
+.unit .u-table-wrap { overflow-x: auto; max-width: 100%; }
+.unit .u-table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.unit .u-table th, .unit .u-table td {
+  border: 1px solid var(--border-soft); padding: 4px 9px; text-align: left;
+  white-space: nowrap;
+}
+.unit .u-table th { background: var(--panel-2); font-weight: 600; }
+.unit .u-editarea {
+  width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13.5px;
+  min-height: 120px; resize: vertical; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--panel); color: var(--ink);
+}
+.unit .u-grid-wrap { overflow-x: auto; max-width: 100%; }
+.unit .u-grid { border-collapse: collapse; font-size: 13px; }
+.unit .u-grid th, .unit .u-grid td {
+  border: 1px solid var(--border-soft); padding: 2px; text-align: left;
+}
+.unit .u-grid th { background: var(--panel-2); text-align: center; padding: 2px 4px; }
+.unit .u-grid th button, .unit .u-grid-rowctl button { padding: 1px 6px; font-size: 11px; }
+.unit .u-grid input {
+  width: 110px; box-sizing: border-box; border: none; background: transparent;
+  color: var(--ink); font: inherit; padding: 4px 6px; outline-offset: -2px;
+}
+.unit .u-grid th input { font-weight: 600; text-align: left; }
+.unit .u-grid input:focus { background: var(--accent-soft); }
+.unit .u-grid-controls { margin-top: 8px; gap: 8px; }
 
 /* ------------------------------------------------------------- tag map --- */
 #tagmap-wrap { position: relative; flex: 1; min-height: 420px;
