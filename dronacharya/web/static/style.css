@@ -213,6 +213,27 @@ textarea { resize: vertical; min-height: 80px; }
 .chip b:hover { opacity: 1; }
 
 .warnbox { color: var(--warn); font-size: 13px; margin-bottom: 6px; }
+
+/* ------------------------------------------------------- recent panel -- */
+.recent-panel {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  margin-top: 22px;
+}
+@media (max-width: 640px) { .recent-panel { grid-template-columns: 1fr; } }
+.recent-h {
+  font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 10px;
+}
+.recent-chips .chip { cursor: pointer; }
+.recent-chips .chip:hover { background: var(--accent); color: var(--accent-ink, #fff); }
+.recent-list { display: flex; flex-direction: column; gap: 2px; }
+.recent-item {
+  display: block; padding: 7px 0; font-size: 13.5px; color: var(--ink);
+  border-bottom: 1px solid var(--border-soft); cursor: pointer;
+}
+.recent-item:hover { color: var(--accent); }
+.recent-item:last-child { border-bottom: none; }
+.recent-empty { color: var(--faint); font-size: 13px; }
 code {
   background: var(--panel-2); border: 1px solid var(--border-soft);
   border-radius: 5px; padding: 1px 6px; font-size: 12.5px;
@@ -229,9 +250,14 @@ code {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow);
   width: min(760px, 100%); animation: pop .14s ease;
+  resize: both; overflow: auto; min-width: 320px; min-height: 200px;
+  max-width: 96vw; max-height: 92vh;
 }
-.dc-modal.small { width: min(420px, 100%); }
+.dc-modal.small { width: min(420px, 100%); resize: none; }
 .dc-modal.wide { width: min(1180px, 96vw); }
+.dc-modal.floating {
+  position: fixed; z-index: 200; box-shadow: 0 24px 64px rgba(4, 6, 10, .45);
+}
 .dc-modal .dc-modal-head {
   display: flex; align-items: center; gap: 10px; padding: 14px 18px;
   border-bottom: 1px solid var(--border-soft);

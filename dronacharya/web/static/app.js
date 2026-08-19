@@ -18,6 +18,65 @@ function sourceLine(s, i) {
   return a;
 }
 
+// ---- recent panel: shown on the empty landing state, hidden once a
+// question is actually running (the thread fills that space instead) ----
+const RECENT_Q_KEY = "dc_recent_questions";
+const recentPanel = document.getElementById("recentPanel");
+const recentSearchesEl = document.getElementById("recentSearches");
+const recentNotesEl = document.getElementById("recentNotes");
+
+function recentQuestions() {
+  try { return JSON.parse(localStorage.getItem(RECENT_Q_KEY) || "[]"); }
+  catch (e) { return []; }
+}
+
+function pushRecentQuestion(q) {
+  q = q.trim();
+  if (!q) return;
+  const list = [q, ...recentQuestions().filter((x) => x !== q)].slice(0, 8);
+  localStorage.setItem(RECENT_Q_KEY, JSON.stringify(list));
+}
+
+function renderRecentSearches() {
+  const list = recentQuestions();
+  recentSearchesEl.innerHTML = "";
+  if (!list.length) { recentSearchesEl.innerHTML = '<span class="recent-empty">Nothing yet</span>'; return; }
+  list.forEach((q) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = q;
+    chip.title = "Ask again";
+    chip.onclick = () => { questionInput.value = q; ask("kb"); };
+    recentSearchesEl.appendChild(chip);
+  });
+}
+
+async function loadRecentNotes() {
+  recentNotesEl.innerHTML = "";
+  let resp;
+  try { resp = await fetch("/api/v1/documents?type=note&limit=5", { headers: headers(false) }); }
+  catch (e) { return; }
+  if (!resp.ok) return;
+  const { documents } = await resp.json().catch(() => ({ documents: [] }));
+  if (!documents || !documents.length) {
+    recentNotesEl.innerHTML = '<span class="recent-empty">No notes yet</span>';
+    return;
+  }
+  documents.forEach((d) => {
+    const item = document.createElement("a");
+    item.className = "recent-item";
+    item.href = "#";
+    item.textContent = d.title || "(untitled)";
+    item.addEventListener("click", (e) => { e.preventDefault(); openDocument(d.id); });
+    recentNotesEl.appendChild(item);
+  });
+}
+
+function hideRecentPanel() { recentPanel.style.display = "none"; }
+
+renderRecentSearches();
+loadRecentNotes();
+
 // ---- tag filter: funnel icon opens a hovering box; multiple tags supported ----
 const activeTags = [];
 const tagInput = document.getElementById("tagfilter");
@@ -64,6 +123,8 @@ async function ask(mode) {
   const q = questionInput.value.trim();
   if (!q) return;
   questionInput.value = "";
+  pushRecentQuestion(q);
+  hideRecentPanel();
 
   const card = document.createElement("div");
   card.className = "card";
@@ -148,6 +209,8 @@ async function findAll() {
   const q = questionInput.value.trim();
   if (!q) return;
   questionInput.value = "";
+  pushRecentQuestion(q);
+  hideRecentPanel();
 
   const card = document.createElement("div");
   card.className = "card";

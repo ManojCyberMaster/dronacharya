@@ -85,18 +85,26 @@
     head.className = "dc-modal-head";
     head.innerHTML = `<div class="t"></div>`;
     head.querySelector(".t").append(title instanceof Node ? title : document.createTextNode(title));
-    const close = document.createElement("button");
-    close.className = "ghost icon"; close.textContent = "✕";
-    close.onclick = () => dismiss();
-    head.appendChild(close);
     const body = document.createElement("div");
     body.className = "dc-modal-body";
     if (typeof bodyEl === "string") body.innerHTML = bodyEl;
     else body.appendChild(bodyEl);
+    if (opts.detachable) {
+      const detach = document.createElement("button");
+      detach.className = "ghost icon"; detach.textContent = "⤢";
+      detach.title = "Open in its own window";
+      detach.onclick = () => detachModal(box, body, title, dismiss);
+      head.appendChild(detach);
+    }
+    const close = document.createElement("button");
+    close.className = "ghost icon"; close.textContent = "✕";
+    close.onclick = () => dismiss();
+    head.appendChild(close);
     box.append(head, body);
     overlay.appendChild(box);
     function dismiss() {
       overlay.remove();
+      box.remove();   // no-op unless detached (floating panels live outside overlay)
       document.removeEventListener("keydown", onKey);
       if (opts.onClose) opts.onClose();
     }
@@ -105,6 +113,72 @@
     document.addEventListener("keydown", onKey);
     document.body.appendChild(overlay);
     return { close: dismiss, body, head };
+  }
+
+  // "Detach": prefer a real OS-level window (Document Picture-in-Picture —
+  // Chromium 116+, stays on top even across tabs/apps); fall back to a
+  // draggable, resizable panel inside the page on browsers without it
+  // (Firefox/Safari). Either way the modal's own backdrop goes away — the
+  // point is to keep reading/editing while using the rest of the app.
+  async function detachModal(box, body, title, dismiss) {
+    const rect = box.getBoundingClientRect();
+    if (window.documentPictureInPicture) {
+      try {
+        const pipWin = await window.documentPictureInPicture.requestWindow({
+          width: Math.round(rect.width), height: Math.round(rect.height),
+        });
+        // PiP windows start with an empty document — carry the app's
+        // stylesheets over so the content doesn't render unstyled.
+        [...document.styleSheets].forEach((ss) => {
+          try {
+            if (ss.href) {
+              const link = document.createElement("link");
+              link.rel = "stylesheet"; link.href = ss.href;
+              pipWin.document.head.appendChild(link);
+            } else {
+              const style = document.createElement("style");
+              style.textContent = [...ss.cssRules].map((r) => r.cssText).join("\n");
+              pipWin.document.head.appendChild(style);
+            }
+          } catch (e) { /* cross-origin stylesheet — can't read its rules, skip */ }
+        });
+        pipWin.document.title = typeof title === "string" ? title
+          : (title.textContent || "DronaCharya");
+        pipWin.document.body.style.cssText =
+          "margin:0;background:var(--bg);color:var(--ink)";
+        pipWin.document.adoptNode(body);
+        pipWin.document.body.appendChild(body);
+        (box.parentElement || box).remove();   // drop the dimmed backdrop + box; content now lives in the pip window
+        pipWin.addEventListener("pagehide", () => dismiss(), { once: true });
+        return;
+      } catch (e) { /* permission denied or unsupported at runtime — fall through */ }
+    }
+    floatPanel(box, body, rect);
+  }
+
+  function floatPanel(box, body, rect) {
+    const overlay = box.parentElement;
+    document.body.appendChild(box);   // re-parent past the dimmed overlay...
+    if (overlay) overlay.remove();    // ...and drop it, so the page stays interactive
+    box.classList.add("floating");
+    Object.assign(box.style, {
+      position: "fixed", margin: "0", left: rect.left + "px", top: rect.top + "px",
+      width: rect.width + "px", height: rect.height + "px",
+    });
+    const headEl = box.querySelector(".dc-modal-head");
+    headEl.style.cursor = "move";
+    let dragging = false, dx = 0, dy = 0;
+    headEl.addEventListener("mousedown", (e) => {
+      if (e.target.closest("button")) return;
+      dragging = true;
+      dx = e.clientX - box.offsetLeft; dy = e.clientY - box.offsetTop;
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      box.style.left = (e.clientX - dx) + "px";
+      box.style.top = (e.clientY - dy) + "px";
+    });
+    document.addEventListener("mouseup", () => { dragging = false; });
   }
 
   function toast(msg, type = "ok") {
@@ -248,7 +322,8 @@
         item${doc.units.length === 1 ? "" : "s"}${isMap ? "" :
         " — hover one to edit or remove it"}.</div>`;
 
-    const m = modal((isMap ? "MindMap: " : "") + (doc.title || "(untitled)"), wrap, { wide: true });
+    const m = modal((isMap ? "MindMap: " : "") + (doc.title || "(untitled)"), wrap,
+                    { wide: true, detachable: true });
 
     // tags editor (chips + add); mind-map tags are owned by the map itself
     const tagsEl = wrap.querySelector("#dv-tags");
@@ -430,7 +505,7 @@
       <div class="row" style="margin-top:12px; justify-content:flex-end">
         <button id="nt-save">Save note</button>
       </div>`;
-    const m = modal(doc ? "Edit note" : "New note", wrap);
+    const m = modal(doc ? "Edit note" : "New note", wrap, { detachable: true });
     const q = (sel) => wrap.querySelector(sel);
     let fmt = fmt0;
     const applyFmt = () => {
