@@ -276,6 +276,9 @@ code {
 .sources a:hover { text-decoration: underline; }
 .qline { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .qline b { color: var(--ink); font-weight: 600; }
+.finditem { font-size: 13px; padding: 4px 0; overflow-wrap: anywhere; }
+.finditem b { color: var(--ink); }
+.finditem div { color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
 
 #tagsuggest { position: absolute; top: 100%; left: 0; z-index: 10; background: var(--panel);
               border: 1px solid var(--border); border-radius: var(--radius-sm);

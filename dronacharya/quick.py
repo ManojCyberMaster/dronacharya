@@ -20,7 +20,7 @@ from .llm.base import ProviderUnavailable
 from .llm.prompts import (QUICK_SEARX_SYSTEM, QUICK_SYSTEM, QUICK_WEB_SYSTEM,
                           RAG_USER, answer_language)
 from .models import Document, KnowledgeUnit, UnitKind, unit_index_text
-from .search import hybrid_search
+from .search import expand_to_section, hybrid_search
 
 NOT_IN_KB = "NOT_IN_KB"
 QUICK_TAG = "quick-ask"
@@ -39,11 +39,12 @@ class QuickResult:
     error: str = ""
 
 
-def _kb_context(sources) -> str:
+def _kb_context(repo, sources) -> str:
+    expanded = expand_to_section(repo, sources)
     lines = []
     for i, r in enumerate(sources, 1):
         origin = r.document.url or r.document.file_path or ""
-        lines.append(f"[{i}] {r.document.title} ({origin})\n{r.unit.text}")
+        lines.append(f"[{i}] {r.document.title} ({origin})\n{expanded[i]}")
     return "\n\n".join(lines)
 
 
@@ -141,7 +142,7 @@ def quick_ask(
         try:
             text, provider = run_complete(
                 chain, QUICK_SYSTEM.format(language=answer_language(question)),
-                RAG_USER.format(context=_kb_context(sources), question=question),
+                RAG_USER.format(context=_kb_context(repo, sources), question=question),
                 max_tokens=300,
             )
         except ProviderUnavailable as e:

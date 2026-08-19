@@ -41,6 +41,10 @@ class Repository(Protocol):
         limit: int = 50, offset: int = 0,
     ) -> list[Document]: ...
     def iter_documents_with_units(self) -> Iterable[tuple[Document, list[KnowledgeUnit]]]: ...
+    def get_document_units(self, document_id: str) -> list[KnowledgeUnit]:
+        """All units of one document, ordered by seq — used to expand a
+        retrieved chunk to its full section (search.py's expand_to_section)."""
+        ...
 
     # --- search primitives (fused in search.py) --------------------------
     def fts_candidates(self, query: str, limit: int) -> list[tuple[int, float]]:

@@ -146,12 +146,25 @@ def ask(
                                     "home server"),
 ):
     """Quick answer: the command line + one usage example, nothing else.
-    Also the default — `dc "how do I …"` runs this command. Falls back to an
+    Also the default — `dc "how do I …"` runs this command, after routing:
+    a question that reads as "find a known document", "explain/compare",
+    or "list every X" is dispatched to `search`/`query`/`find` instead —
+    you should rarely need to type those explicitly. Falls back to an
     internet search when your knowledge base doesn't know, and embeds the
     qualified answer back into the KB (low-confidence answers ask you first)."""
     from .client import ask_local, ask_remote, save_vetted_answer
+    from .router import route_question
 
     config = load_config()
+    route = route_question(config, question)
+    if route != "ask":
+        console.print(f"[dim]→ routed to: {route}[/dim]")
+        if route == "search":
+            return search(question, 8, [], False, local)
+        if route == "query":
+            return query(question, False, None, [])
+        if route == "find":
+            return find(question, False)
     repo = embedder = None
     try:
         # ONE render path for both transports — the facade normalizes them.
@@ -433,18 +446,68 @@ def query(
             answer_text += chunk
             console.print(chunk, end="", soft_wrap=True)
         console.print()
-        # Show only sources the answer actually cited ([n]); in deeper mode an
-        # uncited retrieval candidate was just optional context the model
-        # rejected — listing it would misattribute the answer.
+        # Show only sources the answer actually cited ([n]). An uncited
+        # retrieval candidate was context the model saw but didn't use (or
+        # explicitly declined to answer from) — listing it anyway would
+        # misattribute a "your knowledge base doesn't cover this" reply to
+        # 8 unrelated documents, which is worse than showing no sources.
         cited = set(cited_indices(answer_text))
-        shown = [(i, r) for i, r in enumerate(result.sources or [], 1)
-                 if i in cited or (not deeper and not cited)]
+        shown = [(i, r) for i, r in enumerate(result.sources or [], 1) if i in cited]
         if shown:
             console.print("\n[bold]Sources[/bold]")
             for i, r in shown:
                 origin = r.document.url or r.document.file_path or ""
                 console.print(f"  [{i}] {r.document.title} — [italic cyan underline]{origin}[/italic cyan underline]")
         console.print(f"[dim]answered by {result.provider}[/dim]")
+    finally:
+        repo.close()
+
+
+@app.command()
+def find(
+    question: str,
+    show_code: bool = typer.Option(False, "--show-code",
+                                   help="Print the generated search function before running it"),
+):
+    """Find EVERY item matching a request across your whole knowledge base
+    ("list all my passwords", "every item on my wish lists") — an exhaustive
+    scan, not top-k retrieval. One LLM call writes a small search function
+    from your question alone (it never sees your notes), then that function
+    runs locally over every stored unit in a sandboxed, no-network process."""
+    from rich.markup import escape
+
+    from .search_codegen import find_all
+
+    config = load_config()
+    repo = _open_repo()
+    try:
+        try:
+            result = find_all(repo, _embedder(config), config, question)
+        except Exception as e:  # noqa: BLE001 — surface generation/sandbox failures plainly
+            console.print(str(e), style="red", markup=False)
+            raise typer.Exit(1) from None
+        if show_code:
+            # markup=False: the code is raw Python and may itself contain
+            # "[...]" (list literals) — Rich would otherwise parse those as
+            # markup tags and silently swallow them from the preview.
+            console.print(result.code, style="dim", markup=False)
+            console.print()
+        console.print(f"[dim]scanned {result.scanned} unit(s), "
+                      f"answered by {result.provider}[/dim]\n")
+        if not result.items:
+            console.print("[yellow]No matches.[/yellow]")
+            return
+        console.print(f"[bold]Found {len(result.items)} match(es)[/bold]\n")
+        for item in result.items:
+            # every field here comes from the user's own stored content —
+            # escape before interpolating into markup, or a title/value
+            # containing "[...]" gets silently mangled the same way the
+            # generated code did above.
+            where = f" — {escape(item['where'])}" if item["where"] else ""
+            src = (f"  [italic cyan underline]{escape(item['source'])}[/italic cyan underline]"
+                  if item["source"] else "")
+            console.print(f"[bold]{escape(item['document'])}[/bold]{where}{src}")
+            console.print(f"    {escape(item['text'])}\n")
     finally:
         repo.close()
 

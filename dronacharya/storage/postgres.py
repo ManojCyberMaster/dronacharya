@@ -378,6 +378,12 @@ class PostgresRepo:
                         " WHERE document_id = %s ORDER BY seq", (doc.id,))
             yield doc, [self._tuple_to_unit(r)[1] for r in cur.fetchall()]
 
+    def get_document_units(self, document_id: str) -> list[KnowledgeUnit]:
+        cur = self.conn.cursor()
+        cur.execute(f"SELECT {_UNIT_COLS} FROM knowledge_units"
+                    " WHERE document_id = %s ORDER BY seq", (document_id,))
+        return [self._tuple_to_unit(r)[1] for r in cur.fetchall()]
+
     # ------------------------------------------------------ search primitives
     def fts_candidates(self, query: str, limit: int) -> list[tuple[int, float]]:
         q = _tsquery(query)

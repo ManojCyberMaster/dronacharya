@@ -373,6 +373,14 @@ class SqliteRepo:
             ]
             yield doc, units
 
+    def get_document_units(self, document_id: str) -> list[KnowledgeUnit]:
+        return [
+            self._row_to_unit(u) for u in self.conn.execute(
+                "SELECT * FROM knowledge_units WHERE document_id = ? ORDER BY seq",
+                (document_id,),
+            ).fetchall()
+        ]
+
     # ------------------------------------------------------ search primitives
     def fts_candidates(self, query: str, limit: int) -> list[tuple[int, float]]:
         q = _fts_escape(query)

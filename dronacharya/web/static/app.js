@@ -91,6 +91,7 @@ async function ask(mode) {
   let buffer = "";
   let pendingSources = [];
   let gotDone = false;
+  let noAnswer = false;   // status event fired: nothing was actually answered
   while (true) {
     let done, value;
     try { ({ done, value } = await reader.read()); }
@@ -107,6 +108,7 @@ async function ask(mode) {
       } else if (event === "token") {
         answerEl.textContent += JSON.parse(data);
       } else if (event === "status") {
+        noAnswer = true;
         answerEl.textContent = data === "no_answer"
           ? "Your knowledge base doesn't cover this. Try “Deeper”."
           : "No LLM provider available — configure one in config.toml. Search still works in the Library.";
@@ -115,13 +117,20 @@ async function ask(mode) {
         gotDone = true;
         if (info.provider) footerEl.textContent = "answered by " + info.provider;
         if (info.error) footerEl.textContent += " · answer was cut short (" + info.error + ")";
-        // only list sources the answer actually cited — the SERVER computes
-        // the cited set (single source of truth for every client)
-        const cited = new Set(info.cited || []);
-        pendingSources.forEach((s, i) => {
-          if (cited.has(i + 1) || (mode !== "deeper" && cited.size === 0))
-            sourcesEl.appendChild(sourceLine(s, i));
-        });
+        // No answer was generated at all — the retrieved candidates were
+        // never read by the model, so listing them as "sources" would be a
+        // lie (this was showing 8 unrelated docs alongside "doesn't cover
+        // this" before the fix).
+        if (noAnswer) { /* nothing to attribute */ }
+        else {
+          // only list sources the answer actually cited — the SERVER computes
+          // the cited set (single source of truth for every client)
+          const cited = new Set(info.cited || []);
+          pendingSources.forEach((s, i) => {
+            if (cited.has(i + 1) || (mode !== "deeper" && cited.size === 0))
+              sourcesEl.appendChild(sourceLine(s, i));
+          });
+        }
       }
     }
   }
@@ -133,6 +142,51 @@ async function ask(mode) {
   }
 }
 
+async function findAll() {
+  const q = questionInput.value.trim();
+  if (!q) return;
+  questionInput.value = "";
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="qline">Find all: <b>${esc(q)}</b></div>` +
+    `<div class="answer">Scanning your whole knowledge base…</div>` +
+    `<div class="sources"></div><div class="faint footer" style="margin-top:8px"></div>`;
+  thread.prepend(card);
+  const answerEl = card.querySelector(".answer");
+  const sourcesEl = card.querySelector(".sources");
+  const footerEl = card.querySelector(".footer");
+
+  let resp;
+  try {
+    resp = await fetch("/api/v1/find", {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ question: q }),
+    });
+  } catch (e) {
+    answerEl.textContent = "Server unreachable. Is `dc serve` running?";
+    return;
+  }
+  if (resp.status === 401) { answerEl.textContent = "Invalid token — set it from the sidebar (API token)."; return; }
+  const info = await resp.json().catch(() => ({}));
+  if (!resp.ok) { answerEl.textContent = info.error || "Could not run the scan."; return; }
+  footerEl.textContent = `scanned ${info.scanned} unit(s) · answered by ${info.provider}`;
+  if (!info.items || !info.items.length) {
+    answerEl.textContent = "No matches found.";
+    return;
+  }
+  answerEl.textContent = `Found ${info.items.length} match(es):`;
+  info.items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "finditem";
+    const where = item.where ? ` — ${item.where}` : "";
+    const src = item.source ? ` [${item.source}]` : "";
+    row.innerHTML = `<b>${esc(item.document)}</b>${esc(where)}${esc(src)}<div>${esc(item.text)}</div>`;
+    sourcesEl.appendChild(row);
+  });
+}
+
 document.getElementById("ask").addEventListener("click", () => ask("kb"));
 document.getElementById("deeper").addEventListener("click", () => ask("deeper"));
+document.getElementById("findall").addEventListener("click", () => findAll());
 questionInput.addEventListener("keydown", (e) => { if (e.key === "Enter") ask("kb"); });

@@ -31,6 +31,55 @@ def result_to_json(r) -> dict:
     }
 
 
+MAX_EXPANDED_CHARS = 6000
+
+
+def expand_to_section(repo, sources: list[SearchResult]) -> dict[int, str]:
+    """1-based citation index -> context text, expanded to the retrieved
+    unit's full section when that section was split into several chunks at
+    ingest (chunking.py: a long heading's text becomes multiple units that
+    all carry the SAME heading_path). Without this, an answer that spans
+    two adjacent chunks only ever sees whichever one retrieval happened to
+    rank higher — the neighbor is silently missing from the LLM's context.
+
+    Contiguous by seq, not just matching heading text: a heading name can
+    legitimately repeat elsewhere in a document (e.g. "Notes" under several
+    unrelated sections), and grouping by text alone would stitch unrelated
+    content together."""
+    cache: dict[str, list] = {}
+    out: dict[int, str] = {}
+    for i, r in enumerate(sources, 1):
+        heading = r.unit.heading_path
+        if not heading:
+            out[i] = r.unit.text
+            continue
+        doc_id = r.document.id
+        if doc_id not in cache:
+            cache[doc_id] = sorted(repo.get_document_units(doc_id), key=lambda u: u.seq)
+        units = cache[doc_id]
+        pos = next((idx for idx, u in enumerate(units) if u.id == r.unit.id), None)
+        if pos is None:
+            out[i] = r.unit.text
+            continue
+        lo = hi = pos
+        while lo > 0 and units[lo - 1].heading_path == heading:
+            lo -= 1
+        while hi < len(units) - 1 and units[hi + 1].heading_path == heading:
+            hi += 1
+        if lo == hi:
+            out[i] = r.unit.text
+            continue
+        parts: list[str] = []
+        total = 0
+        for u in units[lo:hi + 1]:
+            if parts and total + len(u.text) > MAX_EXPANDED_CHARS:
+                break
+            parts.append(u.text)
+            total += len(u.text)
+        out[i] = "\n\n".join(parts)
+    return out
+
+
 def confidence_gate(config, reranker) -> float:
     """The threshold matching the score scale actually in use (see
     RetrievalConfig: reranked probabilities vs raw RRF sums)."""

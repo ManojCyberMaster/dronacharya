@@ -12,7 +12,7 @@ from .llm import get_provider_chain
 from .llm.base import ProviderRefusal, ProviderUnavailable
 from .llm.prompts import DEEPER_SYSTEM, RAG_SYSTEM, RAG_USER, answer_language
 from .models import SearchResult
-from .search import hybrid_search
+from .search import expand_to_section, hybrid_search
 
 
 @dataclass
@@ -23,12 +23,13 @@ class QueryResult:
     chunks: Iterator[str] | None = None   # streamed answer text
 
 
-def _context_block(sources: list[SearchResult]) -> str:
+def _context_block(repo, sources: list[SearchResult]) -> str:
+    expanded = expand_to_section(repo, sources)
     lines = []
     for i, r in enumerate(sources, 1):
         origin = r.document.url or r.document.file_path or ""
         crumb = f" — {r.unit.heading_path}" if r.unit.heading_path else ""
-        lines.append(f"[{i}] {r.document.title}{crumb} ({origin})\n{r.unit.text}")
+        lines.append(f"[{i}] {r.document.title}{crumb} ({origin})\n{expanded[i]}")
     return "\n\n".join(lines)
 
 
@@ -73,23 +74,27 @@ def query(
         reranker=reranker,
         tags=tags,
     )
-    from .search import confidence_gate
-    confident = bool(sources) and sources[0].score >= confidence_gate(config, reranker)
     chain = get_provider_chain(config)
 
-    if mode == "kb" and not confident:
+    # Try the LLM whenever retrieval surfaced ANYTHING: RAG_SYSTEM already
+    # instructs it to say plainly when the context doesn't cover the
+    # question. A pre-LLM score threshold used to skip straight to
+    # "no_answer" on any borderline top score — silently discarding
+    # candidates the model never got to read (the same bug already fixed
+    # in quick_ask's KB gate).
+    if mode == "kb" and not sources:
         repo.log_event("query_no_answer", {"q": question[:200]})
         return QueryResult(mode="no_answer", sources=sources)
 
-    result = QueryResult(mode=mode, sources=sources if confident or mode == "kb" else sources)
+    result = QueryResult(mode=mode, sources=sources)
     language = answer_language(question)
     if mode == "deeper":
         system = DEEPER_SYSTEM.format(web_hint="", language=language)
-        context = _context_block(sources) if sources else "(no relevant saved knowledge)"
+        context = _context_block(repo, sources) if sources else "(no relevant saved knowledge)"
         user = RAG_USER.format(context=context, question=question)
     else:
         system = RAG_SYSTEM.format(language=language)
-        user = RAG_USER.format(context=_context_block(sources), question=question)
+        user = RAG_USER.format(context=_context_block(repo, sources), question=question)
 
     try:
         result.chunks = _stream_with_fallthrough(chain, system, user, result)

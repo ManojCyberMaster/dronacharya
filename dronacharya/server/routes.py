@@ -46,6 +46,10 @@ class QueryBody(BaseModel):
     tags: list[str] | None = None
 
 
+class FindBody(BaseModel):
+    question: str = Field(max_length=1000)
+
+
 class AskBody(BaseModel):
     question: str = Field(max_length=4000)
     no_save: bool = False    # never store the answer, even high-confidence
@@ -278,6 +282,26 @@ def query(request: Request, body: QueryBody):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/find")
+def find(request: Request, body: FindBody):
+    """Exhaustive "find every X" scan — see search_codegen.find_all. One
+    LLM call, then a fast local sandboxed sweep of every stored unit;
+    typically well under the latency of the streamed /query endpoint."""
+    from ..search_codegen import find_all
+
+    repo = open_repo(request)
+    try:
+        try:
+            result = find_all(repo, request.app.state.embedder,
+                              request.app.state.config, body.question)
+        except Exception as e:  # noqa: BLE001 — generation/sandbox failure, not a 500 bug
+            return JSONResponse({"error": str(e)[:500]}, status_code=422)
+        return {"code": result.code, "provider": result.provider,
+                "scanned": result.scanned, "items": result.items}
+    finally:
+        repo.close()
 
 
 # ----------------------------------------------------------------- mindmaps
