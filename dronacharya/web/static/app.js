@@ -1,16 +1,18 @@
 // Ask page — streamed answers with cited sources. Shell (token, nav) in shell.js.
-const { headers, esc } = window.DC;
+const { headers, esc, openDocument } = window.DC;
 
 const thread = document.getElementById("thread");
 const questionInput = document.getElementById("question");
 
 function sourceLine(s, i) {
   const origin = s.url || s.file_path || "";
-  const a = document.createElement("a");
   const editor = s.capabilities ? s.capabilities.editor
     : (s.source_type === "mindmap" ? "mindmap" : null);   // pre-capabilities servers
-  if (s.url) { a.href = s.url; a.target = "_blank"; a.rel = "noopener"; }
-  else if (editor) { a.href = "/" + (editor === "todo" ? "todos" : editor); }
+  const a = document.createElement("a");
+  a.href = "#";
+  // opens the actual saved knowledge in the Library, not the raw external
+  // page — the URL/path is shown as text for reference, not as the link
+  a.addEventListener("click", (e) => { e.preventDefault(); openDocument(s.document_id); });
   const title = (editor === "mindmap" ? "MindMap: " : "") + s.title;
   a.textContent = `[${i + 1}] ${title}${s.heading_path ? " · " + s.heading_path : ""}${origin ? " — " + origin : ""}`;
   return a;
@@ -181,7 +183,17 @@ async function findAll() {
     row.className = "finditem";
     const where = item.where ? ` — ${item.where}` : "";
     const src = item.source ? ` [${item.source}]` : "";
-    row.innerHTML = `<b>${esc(item.document)}</b>${esc(where)}${esc(src)}<div>${esc(item.text)}</div>`;
+    const link = document.createElement("a");
+    link.href = "#";
+    link.textContent = item.document;
+    link.addEventListener("click", (e) => { e.preventDefault(); openDocument(item.document_id); });
+    row.appendChild(link);
+    const rest = document.createElement("span");
+    rest.textContent = where + src;
+    row.appendChild(rest);
+    const body = document.createElement("div");
+    body.textContent = item.text;
+    row.appendChild(body);
     sourcesEl.appendChild(row);
   });
 }

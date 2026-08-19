@@ -209,6 +209,7 @@ def find_all(repo, embedder: Embedder, config: Config, question: str, *,
         items.append({
             "text": matched_text,
             "document": doc.title or "(untitled)",
+            "document_id": doc.id,
             "where": unit.heading_path or "",
             "source": doc.url or doc.file_path or "",
         })

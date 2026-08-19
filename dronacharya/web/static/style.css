@@ -231,6 +231,7 @@ code {
   width: min(760px, 100%); animation: pop .14s ease;
 }
 .dc-modal.small { width: min(420px, 100%); }
+.dc-modal.wide { width: min(1180px, 96vw); }
 .dc-modal .dc-modal-head {
   display: flex; align-items: center; gap: 10px; padding: 14px 18px;
   border-bottom: 1px solid var(--border-soft);
@@ -277,7 +278,9 @@ code {
 .qline { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .qline b { color: var(--ink); font-weight: 600; }
 .finditem { font-size: 13px; padding: 4px 0; overflow-wrap: anywhere; }
-.finditem b { color: var(--ink); }
+.finditem > a { color: var(--ink); font-weight: 600; text-decoration: none; }
+.finditem > a:hover { color: var(--accent); text-decoration: underline; }
+.finditem > span { color: var(--muted); }
 .finditem div { color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
 
 #tagsuggest { position: absolute; top: 100%; left: 0; z-index: 10; background: var(--panel);

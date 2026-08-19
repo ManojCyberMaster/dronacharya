@@ -80,7 +80,7 @@
     const overlay = document.createElement("div");
     overlay.className = "dc-overlay";
     const box = document.createElement("div");
-    box.className = "dc-modal" + (opts.small ? " small" : "");
+    box.className = "dc-modal" + (opts.small ? " small" : "") + (opts.wide ? " wide" : "");
     const head = document.createElement("div");
     head.className = "dc-modal-head";
     head.innerHTML = `<div class="t"></div>`;
@@ -248,7 +248,7 @@
         item${doc.units.length === 1 ? "" : "s"}${isMap ? "" :
         " — hover one to edit or remove it"}.</div>`;
 
-    const m = modal((isMap ? "MindMap: " : "") + (doc.title || "(untitled)"), wrap);
+    const m = modal((isMap ? "MindMap: " : "") + (doc.title || "(untitled)"), wrap, { wide: true });
 
     // tags editor (chips + add); mind-map tags are owned by the map itself
     const tagsEl = wrap.querySelector("#dv-tags");
