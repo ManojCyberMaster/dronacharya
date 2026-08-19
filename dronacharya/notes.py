@@ -140,6 +140,25 @@ def update_note(repo, embedder, doc: Document, *, title: str = "",
 # review step), converting the whole document to a note is the wrong fix.
 
 
+def _as_markdown_table(text: str) -> str | None:
+    """XlsxParser stores a sheet as tab-separated rows (first = header).
+    Reconstructing that as one prose paragraph loses the structure
+    entirely — emit real markdown table syntax instead when the shape is
+    unambiguous (every row has the same column count, at least 2 rows)."""
+    rows = [ln.split("\t") for ln in text.split("\n") if ln.strip()]
+    width = len(rows[0]) if rows else 0
+    if len(rows) < 2 or width < 2 or any(len(r) != width for r in rows):
+        return None
+    def esc_cell(c: str) -> str:
+        return c.strip().replace("|", "\\|") or " "
+
+    header, *body = rows
+    out = ["| " + " | ".join(esc_cell(c) for c in header) + " |",
+          "|" + "|".join(["---"] * width) + "|"]
+    out.extend("| " + " | ".join(esc_cell(c) for c in r) + " |" for r in body)
+    return "\n".join(out)
+
+
 def _reconstruct_markdown(units) -> str:
     """Rebuild a markdown document from stored heading_path/text — the
     inverse of chunk_document(). Headings are only emitted where the path
@@ -171,7 +190,7 @@ def _reconstruct_markdown(units) -> str:
             lines.append(f"{'#' * min(level, 6)} {name}")
         prev_path = path
         if u.text and u.text.strip():
-            lines.append(u.text.strip())
+            lines.append(_as_markdown_table(u.text) or u.text.strip())
     return "\n\n".join(lines)
 
 

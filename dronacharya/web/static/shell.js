@@ -443,7 +443,12 @@
       ${origin ? `<div class="muted" style="margin-bottom:8px">${
         doc.url ? `<a href="${esc(doc.url)}" target="_blank" rel="noopener"
                      style="color:var(--accent)">${esc(origin)}</a>` : esc(origin)}</div>` : ""}
-      ${doc.summary ? `<div class="muted" style="margin-bottom:12px">${esc(doc.summary)}</div>` : ""}
+      ${doc.summary ? (textAsGridRows(doc.summary)
+          // a table-shaped summary (XLSX) shouldn't render as raw tab
+          // soup, and shouldn't sit dimmed under .muted either — data
+          // needs full contrast, not just a preview blurb does.
+          ? `<div style="margin-bottom:12px">${renderUnitTextHtml(doc.summary)}</div>`
+          : `<div class="muted" style="margin-bottom:12px">${esc(doc.summary)}</div>`) : ""}
       <div id="dv-units"></div>
       <div class="faint" style="margin-top:8px">${doc.units.length} knowledge
         item${doc.units.length === 1 ? "" : "s"}${isMap ? "" :
@@ -633,7 +638,10 @@
   }
 
   function openNoteEditor(opts = {}) {
-    // opts: { doc?, onSaved? } — doc present = edit mode (format is fixed)
+    // opts: { doc?, onSaved? } — doc present = edit mode. Format can still
+    // be switched during edit (mdToHtml/htmlToMd below carry the content
+    // across) — the radios always show, just pre-checked to the note's
+    // current format.
     const doc = opts.doc || null;
     const fmt0 = doc ? (doc.note_format || "markdown") : "markdown";
     const wrap = document.createElement("div");
@@ -641,11 +649,13 @@
     wrap.innerHTML = `
       <input id="nt-title" type="text" placeholder="title (optional — first heading otherwise)"
              style="width:100%; box-sizing:border-box; margin-bottom:8px">
-      ${doc ? "" : `<div class="row" style="margin-bottom:8px">
+      <div class="row" style="margin-bottom:8px">
         <label style="display:inline-flex;gap:5px;align-items:center">
-          <input type="radio" name="nt-fmt" value="markdown" checked> Markdown</label>
+          <input type="radio" name="nt-fmt" value="markdown"
+                 ${fmt0 === "markdown" ? "checked" : ""}> Markdown</label>
         <label style="display:inline-flex;gap:5px;align-items:center">
-          <input type="radio" name="nt-fmt" value="rich"> Rich text</label></div>`}
+          <input type="radio" name="nt-fmt" value="rich"
+                 ${fmt0 === "rich" ? "checked" : ""}> Rich text</label></div>
       <div id="nt-richbar" class="wtb" style="display:none">
         <button data-cmd="bold" title="Bold"><b>B</b></button>
         <button data-cmd="italic" title="Italic"><i>I</i></button>

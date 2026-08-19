@@ -338,13 +338,13 @@ code {
 .unit .u-tools { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .unit:hover .u-tools { opacity: 1; }
 .unit .u-tools button { padding: 2px 7px; font-size: 12px; }
-.unit .u-table-wrap { overflow-x: auto; max-width: 100%; }
-.unit .u-table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-.unit .u-table th, .unit .u-table td {
+.u-table-wrap { overflow-x: auto; max-width: 100%; }
+.u-table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.u-table th, .u-table td {
   border: 1px solid var(--border-soft); padding: 4px 9px; text-align: left;
-  white-space: nowrap;
+  white-space: nowrap; color: var(--ink);
 }
-.unit .u-table th { background: var(--panel-2); font-weight: 600; }
+.u-table th { background: var(--panel-2); font-weight: 600; }
 .unit .u-editarea {
   width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13.5px;
   min-height: 120px; resize: vertical; padding: 8px 10px; border: 1px solid var(--border);
