@@ -131,3 +131,71 @@ def update_note(repo, embedder, doc: Document, *, title: str = "",
     doc = _build(repo, embedder, doc, title, content, fmt, tags, is_new=False)
     repo.log_event("note_updated", {"document_id": doc.id})
     return doc
+
+
+# Files only — a document has file_path set only when it came from `dc add`
+# or the web upload endpoint (TDL/PDF/office files). Saved web pages have a
+# url instead, never a file_path, and are deliberately NOT eligible: their
+# summary/units are already editable in place (same as the extension's
+# review step), converting the whole document to a note is the wrong fix.
+
+
+def _reconstruct_markdown(units) -> str:
+    """Rebuild a markdown document from stored heading_path/text — the
+    inverse of chunk_document(). Headings are only emitted where the path
+    actually changes between consecutive units, so re-chunking the result
+    reproduces the same heading hierarchy the document already has instead
+    of a flat wall of repeated headings.
+
+    One representational gap: markdown headings only ever narrow scope
+    (there's no way to say "back to no heading at all" once inside one),
+    so a unit that returns all the way to an empty heading_path right
+    after nested ones ends up nested under the last real heading instead
+    of top-level. The text itself is never lost — only that one case's
+    heading attribution can drift, which the user can fix by hand same as
+    anything else in a freshly-converted note."""
+    lines: list[str] = []
+    prev_path: list[str] = []
+    for u in sorted(units, key=lambda x: x.seq):
+        path = [p for p in (u.heading_path or "").split(" > ") if p]
+        i = 0
+        while i < len(path) and i < len(prev_path) and path[i] == prev_path[i]:
+            i += 1
+        if path and i == len(path) and i < len(prev_path):
+            # path is a strict prefix of prev_path (moving to a SHALLOWER,
+            # already-visited heading) — re-emit its own last segment so
+            # split_markdown_sections() actually truncates back up to it,
+            # instead of silently keeping the deeper heading active.
+            i -= 1
+        for level, name in enumerate(path[i:], start=i + 1):
+            lines.append(f"{'#' * min(level, 6)} {name}")
+        prev_path = path
+        if u.text and u.text.strip():
+            lines.append(u.text.strip())
+    return "\n\n".join(lines)
+
+
+def convert_to_note(repo, embedder, document_id: str) -> Document:
+    """In-place: a TDL/PDF/office-file document becomes an editable note —
+    same document, same id. The content stops being a frozen ingest
+    snapshot (re-upload to change) and becomes something the user can
+    actually edit, same as any note they typed directly. Files only —
+    see the module-level note above on why saved web pages are excluded."""
+    doc = repo.get_document(document_id)
+    if doc is None:
+        raise ValueError("document not found")
+    if not doc.file_path:
+        raise ValueError("only uploaded files can be converted to a note")
+    units = repo.get_document_units(document_id)
+    markdown = _reconstruct_markdown(units)
+    if not markdown.strip():
+        raise ValueError("nothing to convert — document has no content")
+    original_type = doc.source_type
+    doc.source_type = SourceType.NOTE
+    doc.file_path = None   # stop claiming the original path — a future
+    doc.url = None          # re-upload/re-save must not collide with this note
+    doc.meta = {**(doc.meta or {}), "converted_from": original_type}
+    doc = _build(repo, embedder, doc, title=doc.title or "", content=markdown,
+                fmt="markdown", tags=repo.get_tags(document_id), is_new=False)
+    repo.log_event("note_converted", {"document_id": doc.id, "from": original_type})
+    return doc

@@ -302,11 +302,12 @@ class PostgresRepo:
             doc.updated_at = utcnow()
         cur.execute(
             "UPDATE documents SET title=%s, saved_note=%s, summary=%s, content_hash=%s,"
-            " distilled=%s, distill_tier=%s, lang=%s, version=%s, meta=%s, updated_at=%s"
+            " distilled=%s, distill_tier=%s, lang=%s, version=%s, meta=%s, updated_at=%s,"
+            " source_type=%s, url=%s, file_path=%s"
             " WHERE id=%s",
             (doc.title, doc.saved_note, doc.summary, doc.content_hash, doc.distilled,
              doc.distill_tier, doc.lang, doc.version, json.dumps(doc.meta),
-             doc.updated_at, doc.id),
+             doc.updated_at, doc.source_type, doc.url, doc.file_path, doc.id),
         )
         cur.execute("DELETE FROM knowledge_units WHERE document_id = %s", (doc.id,))
         self._insert_units(cur, doc, units, embeddings)

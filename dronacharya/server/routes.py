@@ -558,6 +558,26 @@ def update_note_route(request: Request, document_id: str, body: NoteBody):
             repo.close()
 
 
+@router.post("/documents/{document_id}/convert-to-note")
+def convert_document_to_note(request: Request, document_id: str):
+    """In-place: a TDL/PDF/office-file document becomes an editable note —
+    same document, same id."""
+    from ..notes import convert_to_note
+
+    with _COMMIT_LOCK:
+        repo = open_repo(request)
+        try:
+            if repo.get_document(document_id) is None:
+                return JSONResponse({"detail": "not found"}, status_code=404)
+            try:
+                doc = convert_to_note(repo, request.app.state.embedder, document_id)
+            except ValueError as e:
+                return JSONResponse({"detail": str(e)}, status_code=400)
+            return {"id": doc.id, "title": doc.title, "source_type": doc.source_type}
+        finally:
+            repo.close()
+
+
 @router.put("/documents/{document_id}/units")
 def put_units(request: Request, document_id: str, body: UnitsBody):
     """Edit/delete individual knowledge units: the client sends the full new

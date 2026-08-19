@@ -321,6 +321,9 @@
         <span class="badge plain">${esc(doc.source_type)}</span>
         <span id="dv-tags"></span>
         <span class="doc-actions">
+          ${doc.file_path ? `<button class="ghost" id="dv-convert"
+             title="Make this file's content directly editable, like a note">
+             Convert to note</button>` : ""}
           <button class="danger" id="dv-del">Delete document</button></span>
       </div>
       ${origin ? `<div class="muted" style="margin-bottom:8px">${
@@ -479,6 +482,22 @@
       await fetch(`/api/v1/documents/${id}`, { method: "DELETE",
                                                headers: headers(false) });
       m.close(); toast("Document deleted"); changed();
+    };
+    const convertBtn = wrap.querySelector("#dv-convert");
+    if (convertBtn) convertBtn.onclick = async () => {
+      if (!confirm(`Convert "${doc.title}" to a note? You'll be able to edit it `
+                   + "directly from now on — re-uploading the original file will "
+                   + "no longer update it."))
+        return;
+      const r = await fetch(`/api/v1/documents/${id}/convert-to-note`,
+                            { method: "POST", headers: headers(false) });
+      if (!r.ok) {
+        toast((await r.json().catch(() => ({}))).detail || "could not convert", "error");
+        return;
+      }
+      const updated = await r.json();
+      m.close();
+      openDocument(updated.id, opts);   // reopen — now shows the "Edit note" button
     };
   }
 

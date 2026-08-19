@@ -295,11 +295,12 @@ class SqliteRepo:
             doc.updated_at = utcnow()
         cur.execute(
             "UPDATE documents SET title=?, saved_note=?, summary=?, content_hash=?,"
-            " distilled=?, distill_tier=?, lang=?, version=?, meta=?, updated_at=?"
+            " distilled=?, distill_tier=?, lang=?, version=?, meta=?, updated_at=?,"
+            " source_type=?, url=?, file_path=?"
             " WHERE id=?",
             (doc.title, doc.saved_note, doc.summary, doc.content_hash, int(doc.distilled),
              doc.distill_tier, doc.lang, doc.version, json.dumps(doc.meta),
-             doc.updated_at, doc.id),
+             doc.updated_at, doc.source_type, doc.url, doc.file_path, doc.id),
         )
         self._delete_units(cur, doc.id)
         self._insert_units(cur, doc, units, embeddings)
