@@ -252,20 +252,28 @@ code {
   width: min(760px, 100%); animation: pop .14s ease;
   resize: both; overflow: auto; min-width: 320px; min-height: 200px;
   max-width: 96vw; max-height: 92vh;
+  display: flex; flex-direction: column;
 }
 .dc-modal.small { width: min(420px, 100%); resize: none; }
 .dc-modal.wide { width: min(1180px, 96vw); }
+.dc-modal.tall { height: 82vh; }
 .dc-modal.floating {
   position: fixed; z-index: 200; box-shadow: 0 24px 64px rgba(4, 6, 10, .45);
 }
 .dc-modal .dc-modal-head {
   display: flex; align-items: center; gap: 10px; padding: 14px 18px;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft); flex: none;
 }
 .dc-modal .dc-modal-head .t { font-weight: 650; color: var(--ink-strong);
                               font-size: 15px; flex: 1; min-width: 0;
                               overflow: hidden; text-overflow: ellipsis; }
-.dc-modal .dc-modal-body { padding: 16px 18px; }
+.dc-modal .dc-modal-body {
+  padding: 16px 18px; flex: 1 1 auto; overflow: auto; min-height: 0;
+}
+/* note editor: the text area (not the title/toolbar/tags/save row) absorbs
+   whatever extra space resizing or the "wide" default gives the modal */
+.nt-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.nt-editarea { flex: 1 1 auto; min-height: 160px; }
 @keyframes fadein { from { opacity: 0 } }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.99) } }
 

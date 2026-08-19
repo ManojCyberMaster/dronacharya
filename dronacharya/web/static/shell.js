@@ -80,7 +80,8 @@
     const overlay = document.createElement("div");
     overlay.className = "dc-overlay";
     const box = document.createElement("div");
-    box.className = "dc-modal" + (opts.small ? " small" : "") + (opts.wide ? " wide" : "");
+    box.className = "dc-modal" + (opts.small ? " small" : "") + (opts.wide ? " wide" : "")
+      + (opts.tall ? " tall" : "");
     const head = document.createElement("div");
     head.className = "dc-modal-head";
     head.innerHTML = `<div class="t"></div>`;
@@ -151,7 +152,16 @@
         (box.parentElement || box).remove();   // drop the dimmed backdrop + box; content now lives in the pip window
         pipWin.addEventListener("pagehide", () => dismiss(), { once: true });
         return;
-      } catch (e) { /* permission denied or unsupported at runtime — fall through */ }
+      } catch (e) {
+        // Document PiP requires a secure context (HTTPS or localhost) — the
+        // most common reason this fails is DronaCharya being reached over
+        // plain http:// on the LAN. Say so instead of silently switching
+        // modes with no explanation.
+        toast(window.isSecureContext ? "Picture-in-Picture unavailable — opened as a floating panel instead."
+              : "Picture-in-Picture needs HTTPS (this page is http://) — opened as a floating panel instead.");
+      }
+    } else if (!window.isSecureContext) {
+      toast("Picture-in-Picture needs HTTPS (this page is http://) — opened as a floating panel instead.");
     }
     floatPanel(box, body, rect);
   }
@@ -477,6 +487,7 @@
     const doc = opts.doc || null;
     const fmt0 = doc ? (doc.note_format || "markdown") : "markdown";
     const wrap = document.createElement("div");
+    wrap.className = "nt-wrap";
     wrap.innerHTML = `
       <input id="nt-title" type="text" placeholder="title (optional — first heading otherwise)"
              style="width:100%; box-sizing:border-box; margin-bottom:8px">
@@ -495,17 +506,18 @@
         <button data-cmd="removeFormat" title="Clear formatting">⌫ᵃ</button>
       </div>
       <textarea id="nt-md" placeholder="# Heading\n\nYour note — headings become sections…"
-        style="width:100%; box-sizing:border-box; min-height:220px; resize:vertical;
+        class="nt-editarea"
+        style="width:100%; box-sizing:border-box; resize:vertical;
                font-family:ui-monospace,monospace; display:none"></textarea>
-      <div id="nt-rich" contenteditable="true" style="display:none; min-height:220px;
+      <div id="nt-rich" contenteditable="true" class="nt-editarea" style="display:none;
         border:1px solid var(--border); border-radius:8px; padding:10px;
-        background:var(--panel); overflow:auto"></div>
+        background:var(--panel); overflow:auto; resize:vertical"></div>
       <input id="nt-tags" type="text" placeholder="tags, comma separated (optional)"
              style="width:100%; box-sizing:border-box; margin-top:8px">
       <div class="row" style="margin-top:12px; justify-content:flex-end">
         <button id="nt-save">Save note</button>
       </div>`;
-    const m = modal(doc ? "Edit note" : "New note", wrap, { detachable: true });
+    const m = modal(doc ? "Edit note" : "New note", wrap, { wide: true, tall: true, detachable: true });
     const q = (sel) => wrap.querySelector(sel);
     let fmt = fmt0;
     const applyFmt = () => {
