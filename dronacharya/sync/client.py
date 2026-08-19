@@ -22,15 +22,41 @@ class SyncError(RuntimeError):
     pass
 
 
+# One push carries whole documents (note_source, mindmap JSON and all), so an
+# un-pushed backlog can outgrow the server's 25 MB request ceiling. Above it the
+# push 413s, the cursor never advances, and auto-sync retries the identical
+# oversize payload forever — silently. Batch well under the limit instead.
+MAX_PUSH_BYTES = 8 * 1024 * 1024
+MAX_PUSH_OPS = 200
+
+
 def get_self_device_id(repo) -> str:
-    row = repo.conn.execute(
-        "SELECT id FROM devices WHERE name = ?", (SELF_DEVICE_NAME,)
-    ).fetchone()
-    if row:
-        return row["id"]
+    for device in repo.list_devices():
+        if device.get("name") == SELF_DEVICE_NAME:
+            return device["id"]
     device_id = new_id()
     repo.device_update(device_id, name=SELF_DEVICE_NAME)
     return device_id
+
+
+def _batches(ops: list[dict]) -> list[list[dict]]:
+    """Split ops into requests that stay under the server's body limit. A single
+    op larger than the limit is still sent alone — it will fail loudly with a
+    413 naming one document, which is far better than a wedged, silent sync."""
+    out: list[list[dict]] = []
+    current: list[dict] = []
+    size = 0
+    for op in ops:
+        op_size = len(json.dumps(op))
+        if current and (size + op_size > MAX_PUSH_BYTES
+                        or len(current) >= MAX_PUSH_OPS):
+            out.append(current)
+            current, size = [], 0
+        current.append(op)
+        size += op_size
+    if current:
+        out.append(current)
+    return out
 
 
 def _request(config: Config, method: str, path: str, payload: dict | None = None) -> dict:
@@ -62,32 +88,50 @@ class SyncReport:
     pulled: int = 0
     conflicts: int = 0
     deleted: int = 0
+    failed: int = 0
 
 
 _AUTO_SYNC_KEY = "__auto_sync_ts__"
 
+# Escape hatch for testing against a real config that points at a live server:
+# auto-sync is on by default, fires from `dc save`/`add`/`note`/`sync-notes`,
+# and a first sync pushes the ENTIRE local KB (a new device starts at seq 0).
+SYNC_DISABLED_ENV = "DRONACHARYA_NO_SYNC"
+
+
+def sync_disabled() -> bool:
+    import os
+
+    return os.environ.get(SYNC_DISABLED_ENV, "").strip().lower() not in ("", "0", "false")
+
 
 def maybe_auto_sync(repo, config: Config, *, quiet: bool = True,
-                    on_start=None) -> "SyncReport | None":
+                    on_start=None, on_error=None) -> "SyncReport | None":
     """Opportunistic reconcile implementing [sync] auto / interval_seconds:
     called by CLI commands after KB-touching work. Rate-limited via a
     timestamp in sync_state; never raises (offline is normal, not an error)."""
     import time
 
     if (not config.sync.auto or config.deployment.role != "client"
-            or not config.server.remote_url):
+            or not config.server.remote_url or sync_disabled()):
         return None
     state = repo.get_sync_state(_AUTO_SYNC_KEY)
     now = time.time()
     if state and now - state[0] < config.sync.interval_seconds:
         return None
-    repo.set_sync_state(_AUTO_SYNC_KEY, now, "auto")
     if on_start is not None:
         on_start()
     try:
-        return sync_once(repo, config)
-    except Exception:  # noqa: BLE001 — offline/unreachable: try again next interval
+        report = sync_once(repo, config)
+    except Exception as exc:  # noqa: BLE001 — offline is normal, not an error
+        # Stamp only on a REAL attempt outcome, and say something: stamping
+        # before the try meant a failing sync went quiet for a whole interval.
+        repo.set_sync_state(_AUTO_SYNC_KEY, now, "auto")
+        if on_error is not None and not quiet:
+            on_error(exc)
         return None
+    repo.set_sync_state(_AUTO_SYNC_KEY, now, "auto")
+    return report
 
 
 def sync_once(repo, config: Config) -> SyncReport:
@@ -100,12 +144,19 @@ def sync_once(repo, config: Config) -> SyncReport:
                    repo.oplog_since(last_push, local_only=True)
                    if entity in ("document", "tags")}
 
-    # 1. push
+    # 1. push — in batches that fit the server's request ceiling
     ops, local_latest = collect_ops(repo, last_push, local_only=True)
-    if ops:
+    for batch in _batches(ops):
         _request(config, "POST", "/api/v1/sync/push",
-                 {"device_id": device_id, "ops": ops})
-        report.pushed = len(ops)
+                 {"device_id": device_id, "ops": batch})
+        report.pushed += len(batch)
+        # record WHICH documents left this device, not just how many: without
+        # it there is no way to tell afterwards what a sync actually sent
+        repo.log_event("sync_push", {
+            "device_id": device_id,
+            "document_ids": [o.get("entity_id") or o.get("doc", {}).get("id")
+                             for o in batch],
+        })
     repo.device_update(device_id, push_seq=local_latest)
 
     # 2. pull
@@ -120,7 +171,9 @@ def sync_once(repo, config: Config) -> SyncReport:
     report.pulled = summary["applied"]
     report.conflicts = summary["conflicts"]
     report.deleted = summary["deleted"]
+    report.failed = summary.get("failed", 0)
     repo.device_update(device_id, pull_seq=int(resp.get("latest_seq", last_pull)))
     repo.log_event("sync", {"pushed": report.pushed, "pulled": report.pulled,
-                            "conflicts": report.conflicts})
+                            "conflicts": report.conflicts,
+                            "deleted": report.deleted, "failed": report.failed})
     return report

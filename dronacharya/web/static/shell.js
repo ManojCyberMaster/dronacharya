@@ -191,6 +191,52 @@
     document.addEventListener("mouseup", () => { dragging = false; });
   }
 
+  // FastAPI validation errors put `detail` as a list of {msg, loc, ...}
+  // objects rather than a string — shown raw it renders as "[object Object]".
+  function errText(body) {
+    const d = body && body.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d))
+      return d.map(e => (e && typeof e === "object") ? (e.msg || JSON.stringify(e))
+                                                       : String(e)).join("; ");
+    if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+    return null;
+  }
+
+  // Every request should go through this. Fetch only rejects on a network
+  // failure — a 403, 422 or 500 is a perfectly "successful" promise — so code
+  // that awaited fetch and moved on reported work as done that the server had
+  // refused: "Document deleted" on a 403, tag chips that revert on reload,
+  // reviewed edits discarded with a checkmark. One place to get that right.
+  //
+  //   const r = await req("/api/v1/x", { method: "DELETE" });
+  //   if (!r.ok) return;            // the user has already been told why
+  //
+  // Pass {quiet: true} to handle the message yourself; r.error always holds
+  // the server's own wording when it sent one.
+  async function req(path, opts = {}) {
+    const { quiet = false, json = true, ...init } = opts;
+    let resp;
+    try {
+      resp = await fetch(path, { headers: headers(json && "body" in init), ...init });
+    } catch (e) {
+      const error = "cannot reach the server — check your connection";
+      if (!quiet) toast(error, "error");
+      return { ok: false, error, offline: true };
+    }
+    let data = null;
+    try { data = await resp.json(); } catch (e) { /* empty or non-JSON body */ }
+    if (resp.ok) return { ok: true, data, status: resp.status };
+    if (resp.status === 401) {
+      const error = "your session has expired — sign in again";
+      if (!quiet) toast(error, "error");
+      return { ok: false, error, status: 401, auth: true, data };
+    }
+    const error = errText(data || {}) || `request failed (${resp.status})`;
+    if (!quiet) toast(error, "error");
+    return { ok: false, error, status: resp.status, data };
+  }
+
   function toast(msg, type = "ok") {
     let holder = document.getElementById("dc-toasts");
     if (!holder) {
@@ -263,10 +309,11 @@
   let tagCache = null;
   async function knownTags(force = false) {
     if (tagCache === null || force) {
-      try {
-        const r = await fetch("/api/v1/tags", { headers: headers(false) });
-        tagCache = r.ok ? (await r.json()).tags.map(t => t.name) : [];
-      } catch { tagCache = []; }
+      const r = await req("/api/v1/tags", { quiet: true });
+      // a FAILED lookup must not be cached as "no tags exist", or suggestions
+      // stay empty for the rest of the session even after the server recovers
+      if (r.ok) tagCache = (r.data.tags || []).map(t => t.name);
+      else return tagCache || [];
     }
     return tagCache;
   }
@@ -304,10 +351,22 @@
   // and render a real table instead; anything else displays as before.
   function textAsGridRows(text) {
     const lines = (text || "").split("\n").filter(l => l.trim() !== "");
-    const rows = lines.map(l => l.split("\t"));
-    const looksLikeTable = rows.length >= 2 && rows[0].length > 1
+    let rows = lines.map(l => l.split("\t"));
+    let looksLikeTable = rows.length >= 2 && rows[0].length > 1
       && rows.every(r => r.length === rows[0].length);
-    return looksLikeTable ? rows : null;
+    if (looksLikeTable) return rows;
+    // Converting a sheet to a note rewrites its rows as a markdown pipe table,
+    // and nothing converted them back — so the grid editor silently disappeared
+    // for good the first time a spreadsheet was converted. Read that shape too.
+    const pipe = lines.filter(l => !/^\s*\|?\s*:?-{2,}/.test(l))
+                      .map(l => l.trim())
+                      .filter(l => l.startsWith("|") && l.endsWith("|"))
+                      .map(l => l.slice(1, -1)
+                                 .split(/(?<!\\)\|/)
+                                 .map(c => c.replace(/\\\|/g, "|").trim()));
+    looksLikeTable = pipe.length >= 2 && pipe.length === lines.length - 1
+      && pipe[0].length > 1 && pipe.every(r => r.length === pipe[0].length);
+    return looksLikeTable ? pipe : null;
   }
 
   function renderUnitTextHtml(text) {
@@ -416,9 +475,9 @@
   // Shows a document with its knowledge units; units are editable/deletable
   // (mind maps redirect to the editor). Used by Library and Tags pages.
   async function openDocument(id, opts = {}) {
-    const resp = await fetch(`/api/v1/documents/${id}`, { headers: headers(false) });
-    if (!resp.ok) { toast("Could not load the document", "error"); return; }
-    const doc = await resp.json();
+    const loaded = await req(`/api/v1/documents/${id}`);
+    if (!loaded.ok) return;      // req already said why (offline, 403, 404…)
+    const doc = loaded.data;
     const changed = () => opts.onChange && opts.onChange();
     // server-declared capabilities; fall back for pre-capabilities servers
     const caps = doc.capabilities
@@ -465,10 +524,8 @@
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.innerHTML = isMap ? esc(t) : `${esc(t)} <b title="remove tag">×</b>`;
-        if (!isMap) chip.querySelector("b").onclick = async () => {
-          doc.tags.splice(i, 1);
-          await saveTags();
-        };
+        if (!isMap) chip.querySelector("b").onclick = () =>
+          saveTags(doc.tags.filter((_, j) => j !== i));
         tagsEl.appendChild(chip);
       });
       if (isMap) return;
@@ -486,7 +543,7 @@
         add.replaceWith(holder);
         const commit = async (t) => {
           t = (t ?? input.value).trim();
-          if (t && !doc.tags.includes(t)) { doc.tags.push(t); await saveTags(); }
+          if (t && !doc.tags.includes(t)) await saveTags([...doc.tags, t]);
           else renderTags();
         };
         attachTagSuggest(input, commit);
@@ -500,10 +557,13 @@
       };
       tagsEl.appendChild(add);
     }
-    async function saveTags() {
-      await fetch(`/api/v1/documents/${id}`, {
-        method: "PATCH", headers: headers(),
-        body: JSON.stringify({ tags: doc.tags }) });
+    // takes the PROPOSED tag list and only adopts it once the server agrees —
+    // mutating doc.tags first meant a refused edit still showed as applied
+    async function saveTags(next) {
+      const r = await req(`/api/v1/documents/${id}`, {
+        method: "PATCH", body: JSON.stringify({ tags: next }) });
+      if (!r.ok) { renderTags(); return; }   // chips still show the real state
+      doc.tags = next;
       knownTags(true);
       renderTags(); changed();
     }
@@ -512,8 +572,12 @@
     // units
     const unitsEl = wrap.querySelector("#dv-units");
     const editable = !ownedElsewhere;
-    if (!editable && caps.editor === "note") {
-      unitsEl.innerHTML = "";
+    const isNote = caps.editor === "note";
+    if (isNote) {
+      // the full note content (every section, not just the 300-char
+      // doc.summary blurb) renders below, read-only — a user converting a
+      // document needs to actually see it came out right before trusting
+      // it enough to open the editor.
       const btn = document.createElement("button");
       btn.textContent = "Edit note";
       btn.style.marginBottom = "10px";
@@ -531,14 +595,9 @@
         every change re-enters the corpus automatically.</div>`;
     }
     async function putUnits() {
-      const resp = await fetch(`/api/v1/documents/${id}/units`, {
-        method: "PUT", headers: headers(),
-        body: JSON.stringify({ units: doc.units }) });
-      if (!resp.ok) {
-        const detail = (await resp.json().catch(() => ({}))).detail;
-        toast(detail || "Save failed", "error");
-        return false;
-      }
+      const r = await req(`/api/v1/documents/${id}/units`, {
+        method: "PUT", body: JSON.stringify({ units: doc.units }) });
+      if (!r.ok) return false;
       toast("Saved — re-embedded into your knowledge base");
       changed();
       return true;
@@ -611,12 +670,17 @@
     // note/todo/mindmap already rendered their own message/button above —
     // dumping every raw unit into #dv-units too made "Edit note" sit on
     // top of a full section list instead of replacing it.
-    if (editable) renderUnits();
+    // todo/mindmap already rendered their own message above and are skipped
+    // here (their content lives in a dedicated editor page, not as units
+    // worth previewing inline). Notes render read-only alongside their
+    // "Edit note" button — see isNote above.
+    if (editable || isNote) renderUnits();
 
-    wrap.querySelector("#dv-del").onclick = async () => {
+    const delBtnEl = wrap.querySelector("#dv-del");
+    if (delBtnEl) delBtnEl.onclick = async () => {
       if (!confirm(`Delete "${doc.title}" and all its knowledge?`)) return;
-      await fetch(`/api/v1/documents/${id}`, { method: "DELETE",
-                                               headers: headers(false) });
+      const r = await req(`/api/v1/documents/${id}`, { method: "DELETE" });
+      if (!r.ok) return;   // stay open: the document is still there
       m.close(); toast("Document deleted"); changed();
     };
     const convertBtn = wrap.querySelector("#dv-convert");
@@ -625,13 +689,12 @@
                    + "single free-form note — re-uploading the original file will "
                    + "no longer update it."))
         return;
-      const r = await fetch(`/api/v1/documents/${id}/convert-to-note`,
-                            { method: "POST", headers: headers(false) });
-      if (!r.ok) {
-        toast((await r.json().catch(() => ({}))).detail || "could not convert", "error");
-        return;
-      }
-      const updated = await r.json();
+      const r = await req(`/api/v1/documents/${id}/convert-to-note`,
+                          { method: "POST" });
+      if (!r.ok) return;
+      const updated = r.data;
+      changed();                        // library grid still shows the old
+                                         // source_type/tags badge otherwise
       m.close();
       openDocument(updated.id, opts);   // reopen — now shows the "Edit note" button
     };
@@ -752,7 +815,10 @@
       else q("#nt-md").value = doc.note_source || "";
     }
     applyFmt();
+    let saving = false;
     q("#nt-save").onclick = async () => {
+      // a second click before the first POST resolves created a DUPLICATE note
+      if (saving) return;
       const content = fmt === "rich" ? q("#nt-rich").innerHTML
                                      : q("#nt-md").value;
       if (!(fmt === "rich" ? q("#nt-rich").textContent : content).trim()) {
@@ -760,16 +826,16 @@
       }
       const tags = q("#nt-tags").value.split(",").map(t => t.trim())
         .filter(Boolean);
-      const resp = await fetch(doc ? `/api/v1/notes/${doc.id}` : "/api/v1/notes", {
-        method: doc ? "PUT" : "POST", headers: headers(),
+      saving = true;
+      q("#nt-save").disabled = true;
+      const r = await req(doc ? `/api/v1/notes/${doc.id}` : "/api/v1/notes", {
+        method: doc ? "PUT" : "POST",
         body: JSON.stringify({ title: q("#nt-title").value.trim(),
                                content, format: fmt, tags }),
       });
-      if (!resp.ok) {
-        toast((await resp.json().catch(() => ({}))).detail || "save failed",
-              "error");
-        return;
-      }
+      saving = false;
+      q("#nt-save").disabled = false;
+      if (!r.ok) return;
       toast("Note saved — searchable now");
       knownTags(true);
       m.close();
@@ -778,8 +844,8 @@
     (fmt === "rich" ? q("#nt-rich") : q("#nt-md")).focus();
   }
 
-  window.DC = { headers, esc, modal, toast, openDocument, promptModal,
-                openNoteEditor,
+  window.DC = { headers, esc, modal, toast, errText, req, openDocument,
+                promptModal, openNoteEditor,
                 knownTags, attachTagSuggest, onToken: null };
   buildShell();
 })();

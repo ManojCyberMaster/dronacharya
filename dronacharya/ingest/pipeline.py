@@ -142,7 +142,8 @@ def save_web(
         status = "created"
 
     if tags:
-        repo.set_tags(doc.id, tags)
+        # part of this save: the insert/replace above already ticked the version
+        repo.set_tags(doc.id, tags, bump_version=False)
     repo.log_event("save_" + status, {"url": url, "units": len(units)})
     return SaveOutcome(status=status, document_id=doc.id, message=doc.title)
 

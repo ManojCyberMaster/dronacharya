@@ -10,6 +10,7 @@ supported — resave them in the modern format.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import zipfile
 from pathlib import Path
@@ -62,7 +63,13 @@ class DocxParser:
                 continue
             style = para.find(f"{W}pPr/{W}pStyle")
             style_val = style.get(f"{W}val", "") if style is not None else ""
-            if re.match(r"(?i)heading|title", style_val):
+            # localized Word writes localized styleIds ("berschrift1" in
+            # German, "Ttulo1" in Spanish), so an English-only match collapsed
+            # such a document into one unheaded blob. outlineLvl is the
+            # language-independent signal and is present on real headings.
+            outline = para.find(f"{W}pPr/{W}outlineLvl")
+            if re.match(r"(?i)heading|title|berschrift|titre|ttulo|titolo|rubrik",
+                        style_val) or outline is not None:
                 flush()
                 heading = text
             else:
@@ -74,30 +81,66 @@ class DocxParser:
 
 
 class PptxParser:
-    """One section per slide; the slide's first line acts as its heading."""
+    """One section per slide; the slide's first line acts as its heading.
+
+    Speaker notes are ingested too: on a content-light deck the actual
+    knowledge usually lives in the presenter notes, and reading only the slide
+    bodies silently reduced such a deck to a list of headings.
+    """
+
+    @staticmethod
+    def _notes_for(zf: zipfile.ZipFile, slide_name: str, names: set[str]) -> str:
+        """The notesSlide part for a slide, via its relationships. Falls back to
+        matching numbers, which is right for decks where every slide has notes."""
+        base = slide_name.rsplit("/", 1)[-1]
+        rels = _read_xml(zf, f"ppt/slides/_rels/{base}.rels")
+        if rels is not None:
+            for rel in rels.iter(f"{PR}Relationship"):
+                target = rel.get("Target", "")
+                if "notesSlide" not in target:
+                    continue
+                if target.startswith("/"):
+                    return target.lstrip("/")
+                return posixpath.normpath(posixpath.join("ppt/slides", target))
+        num = re.search(r"\d+", base)
+        return f"ppt/notesSlides/notesSlide{num.group()}.xml" if num else ""
+
+    @staticmethod
+    def _lines(root) -> list[str]:
+        out = []
+        for p in root.iter(f"{A}p"):
+            line = "".join(t.text or "" for t in p.iter(f"{A}t")).strip()
+            if line:
+                out.append(line)
+        return out
 
     def parse(self, path: Path) -> ParsedFile | None:
         sections: list[ParsedSection] = []
         try:
             with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
                 slides = sorted(
-                    (n for n in zf.namelist()
+                    (n for n in names
                      if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
                     key=lambda n: int(re.search(r"\d+", n).group()))
                 for idx, name in enumerate(slides, start=1):
                     root = _read_xml(zf, name)
-                    if root is None:
+                    paras = self._lines(root) if root is not None else []
+                    # notesSlideN.xml is numbered independently of slideN.xml,
+                    # so resolve through the slide's relationships when we can
+                    notes_name = self._notes_for(zf, name, names)
+                    notes_root = (_read_xml(zf, notes_name)
+                                  if notes_name in names else None)
+                    notes = self._lines(notes_root) if notes_root is not None else []
+                    # the notes pane repeats the slide number as a lone line
+                    notes = [ln for ln in notes if ln != str(idx)]
+                    if not paras and not notes:
                         continue
-                    paras = []
-                    for p in root.iter(f"{A}p"):
-                        line = "".join(t.text or "" for t in p.iter(f"{A}t")).strip()
-                        if line:
-                            paras.append(line)
-                    if not paras:
-                        continue
-                    title = paras[0][:80]
-                    text = "\n".join(paras)
-                    for chunk in chunk_text(text):
+                    title = (paras[0] if paras else notes[0])[:80]
+                    body = list(paras)
+                    if notes:
+                        body.append("Speaker notes: " + "\n".join(notes))
+                    for chunk in chunk_text("\n".join(body)):
                         sections.append(
                             ParsedSection(f"slide {idx}: {title}", chunk.text))
         except (OSError, zipfile.BadZipFile):
@@ -152,7 +195,12 @@ class XlsxParser:
         rel_map = {}
         if rels is not None:
             for rel in rels.iter(f"{PR}Relationship"):
-                rel_map[rel.get("Id")] = "xl/" + rel.get("Target", "").lstrip("/")
+                target = rel.get("Target", "")
+                # a Target may be absolute ("/xl/worksheets/sheet2.xml"), which
+                # is legal OOXML; prefixing "xl/" then produced "xl/xl/..." and
+                # the sheet was skipped without a word
+                rel_map[rel.get("Id")] = (target.lstrip("/") if target.startswith("/")
+                                          else "xl/" + target)
         out: list[tuple[str, str]] = []
         if wb is not None:
             for sh in wb.iter(f"{S}sheet"):
@@ -179,10 +227,15 @@ class XlsxParser:
 
     @classmethod
     def _rows(cls, root, shared: list[str]) -> tuple[list[str], bool]:
-        lines: list[str] = []
+        """Rows as tab-separated lines, every row padded to the SHEET's column
+        count. Trimming each row to its own last non-empty cell made column
+        counts differ between rows, and both the grid editor and the markdown
+        table conversion require a uniform width — so one row with an empty
+        last cell silently degraded the whole sheet to unstructured tab soup."""
+        rows: list[dict[int, str]] = []
         truncated = False
         for row in root.iter(f"{S}row"):
-            if len(lines) >= MAX_SHEET_ROWS:
+            if len(rows) >= MAX_SHEET_ROWS:
                 truncated = True
                 break
             cells: dict[int, str] = {}
@@ -202,12 +255,19 @@ class XlsxParser:
                 col = cls._col_index(c.get("r", ""))
                 if col is None:
                     col = pos
-                cells[col] = val
+                # a cell can legitimately contain its own line breaks (Excel
+                # supports multi-line cell text) — but rows are joined with
+                # "\n" below, so an embedded newline would be indistinguishable
+                # from a row boundary and corrupt every row after it. One
+                # logical row must stay one line of text.
+                cells[col] = " ".join(val.split())
                 pos = col + 1
-            if not cells:
+            if not cells or not any(v.strip() for v in cells.values()):
                 continue
-            line = "\t".join(cells.get(i, "")
-                             for i in range(max(cells) + 1)).rstrip()
-            if line.strip():
-                lines.append(line)
+            rows.append(cells)
+        if not rows:
+            return [], truncated
+        width = max(max(cells) for cells in rows) + 1
+        lines = ["\t".join(cells.get(i, "") for i in range(width))
+                 for cells in rows]
         return lines, truncated

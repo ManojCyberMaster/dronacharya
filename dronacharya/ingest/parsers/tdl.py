@@ -49,17 +49,29 @@ _BOOKKEEPING_ATTRS = {
 
 _GUID_RE = re.compile(r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
                       r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")
-_OLE_DATE_RE = re.compile(r"^\d{3,6}\.\d+$")   # e.g. 45908.05605324
+# An OLE Automation date for any plausible real date is 5 digits before the
+# point with a long fraction (45908.05605324). The old \d{3,6}\.\d+ also
+# matched ordinary user values — a "Price" of 199.99 was silently dropped.
+_OLE_DATE_RE = re.compile(r"^\d{5}\.\d{4,}$")
 
 
-def _looks_internal(name: str, value: str) -> bool:
+def _looks_internal(name: str, value: str, *, labelled: bool = False) -> bool:
     """Catches TDL bookkeeping this parser doesn't know the exact name of:
     style/formatting IDs (*COLOR, *WEBCOLOR), GUIDs (COMMENTSTYPE and
     friends), raw OLE Automation date serials (a STRING sibling already has
     the readable form), and long encoded blobs — CUSTOMCOMMENTS is a
     compressed/binary re-encoding of the SAME text already captured via
     COMMENTS, not new content, and despite the name it is not a custom
-    column."""
+    column.
+
+    `labelled` means the file's COLUMNDEFINITIONS give this attribute a human
+    title, i.e. the user defined it as a column. Then it is user data by
+    definition and NEVER dropped on the shape of its value — guessing from
+    shape silently ate exactly the high-value fields (a licence key that
+    happens to be a GUID, a price that looks like a date serial).
+    """
+    if labelled:
+        return False
     upper = name.upper()
     if upper.endswith("COLOR") or upper.endswith("WEBCOLOR"):
         return True
@@ -100,11 +112,13 @@ def _task_fields(task: ET.Element, labels: dict[str, str]) -> str:
             continue
         if tag == "COMMENTS":
             parts.append(text)
-        elif tag != "TASK" and tag not in _BOOKKEEPING_ATTRS and not _looks_internal(tag, text):
+        elif (tag != "TASK" and tag not in _BOOKKEEPING_ATTRS
+              and not _looks_internal(tag, text, labelled=child.tag in labels)):
             parts.append(f"{labels.get(child.tag, child.tag)}: {text}")
     for name, value in task.attrib.items():
         value = value.strip()
-        if not value or name.upper() in _BOOKKEEPING_ATTRS or _looks_internal(name, value):
+        if (not value or name.upper() in _BOOKKEEPING_ATTRS
+                or _looks_internal(name, value, labelled=name in labels)):
             continue
         parts.append(f"{labels.get(name, name)}: {value}")
     return "\n".join(p.strip() for p in parts if p.strip())

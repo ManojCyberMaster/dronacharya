@@ -18,6 +18,28 @@ function apiHeaders(cfg, json = true) {
   };
 }
 
+// FastAPI sends `detail` as a string OR a list of {msg, loc} objects — shown
+// raw the latter renders as "[object Object]".
+function errDetail(body) {
+  const d = body && body.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d))
+    return d.map(e => (e && typeof e === "object") ? (e.msg || JSON.stringify(e))
+                                                   : String(e)).join("; ");
+  if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+  return "";
+}
+
+// to-do section feedback: the list area doubles as the status line so a failed
+// action always says something instead of silently reverting on the next load
+function setStatus(msg) {
+  const el = $("todoCount");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = "var(--danger, #b3261e)";
+  setTimeout(() => { el.style.color = ""; loadTodos(); }, 3000);
+}
+
 async function init() {
   const cfg = await settings();
   $("serverUrl").value = cfg.serverUrl;
@@ -38,7 +60,17 @@ async function init() {
     return;
   }
   currentTabId = tab.id;
-  page = await chrome.runtime.sendMessage({ type: "capture", tabId: tab.id });
+  // capture fails on pages Chrome refuses to script (Web Store, chrome://).
+  // Without this guard `page` stayed undefined and the next line threw,
+  // leaving a half-dead popup with no explanation.
+  try {
+    page = await chrome.runtime.sendMessage({ type: "capture", tabId: tab.id });
+  } catch { page = null; }
+  if (!page || !page.title) {
+    $("pagetitle").textContent = "This page can't be read by the extension.";
+    $("save").disabled = true;
+    return;
+  }
   $("pagetitle").textContent = page.title;
   if (page.selection && page.selection.trim()) $("saveSel").style.display = "inline-block";
 }
@@ -147,17 +179,32 @@ async function loadTodos() {
     if (dueTs) row.querySelector(".due").textContent =
       new Date(dueTs).toLocaleString([], { month: "short", day: "numeric",
                                            hour: "2-digit", minute: "2-digit" });
-    row.querySelector("input").onchange = async () => {
+    row.querySelector("input").onchange = async (e) => {
       row.classList.add("done");
-      await fetch(base + "/api/v1/todos/" + t.id, {
-        method: "PATCH", headers: apiHeaders(cfg),
-        body: JSON.stringify({ done: true }) });
+      let ok = false;
+      try {
+        const r = await fetch(base + "/api/v1/todos/" + t.id, {
+          method: "PATCH", headers: apiHeaders(cfg),
+          body: JSON.stringify({ done: true }) });
+        ok = r.ok;
+      } catch { ok = false; }
+      if (!ok) {   // it used to just silently un-tick itself on the next load
+        row.classList.remove("done");
+        e.target.checked = false;
+        setStatus("Could not mark that done — is your server reachable?");
+        return;
+      }
       chrome.runtime.sendMessage({ type: "sync-todo-alarms" });
       setTimeout(loadTodos, 600);
     };
     row.querySelector(".x").onclick = async () => {
-      await fetch(base + "/api/v1/documents/" + t.id, {
-        method: "DELETE", headers: apiHeaders(cfg, false) });
+      let ok = false;
+      try {
+        const r = await fetch(base + "/api/v1/documents/" + t.id, {
+          method: "DELETE", headers: apiHeaders(cfg, false) });
+        ok = r.ok;
+      } catch { ok = false; }
+      if (!ok) { setStatus("Could not delete that to-do."); return; }
       chrome.runtime.sendMessage({ type: "sync-todo-alarms" });
       loadTodos();
     };
@@ -165,16 +212,27 @@ async function loadTodos() {
   });
 }
 
+let addingTodo = false;
 async function addTodo() {
+  if (addingTodo) return;
   const text = $("todoText").value.trim();
   if (!text) return;
   const cfg = await settings();
   const dueLocal = $("todoDue").value;    // datetime-local, empty if unset
   const due = dueLocal ? new Date(dueLocal).toISOString() : null;
+  addingTodo = true;
+  let ok = false;
+  try {
+    const r = await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/todos", {
+      method: "POST", headers: apiHeaders(cfg),
+      body: JSON.stringify({ text, due }) });
+    ok = r.ok;
+  } catch { ok = false; }
+  addingTodo = false;
+  // clear only after it exists — clearing first threw the typed text away
+  // whenever the server was unreachable or refused it
+  if (!ok) { setStatus("Could not add that to-do — check your server."); return; }
   $("todoText").value = ""; $("todoDue").value = "";
-  await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/todos", {
-    method: "POST", headers: apiHeaders(cfg),
-    body: JSON.stringify({ text, due }) });
   chrome.runtime.sendMessage({ type: "sync-todo-alarms" });
   loadTodos();
 }
@@ -182,22 +240,40 @@ $("todoAdd").onclick = addTodo;
 $("todoText").addEventListener("keydown", (e) => { if (e.key === "Enter") addTodo(); });
 loadTodos();
 
+let asking = false;
 $("question").addEventListener("keydown", async (e) => {
   if (e.key !== "Enter") return;
+  // a second Enter used to interleave a second answer into the same element
+  if (asking) return;
   const q = $("question").value.trim();
   if (!q) return;
   const cfg = await settings();
   $("answer").textContent = "…";
   $("answerSources").textContent = "";
-  const resp = await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/query", {
-    method: "POST", headers: apiHeaders(cfg),
-    body: JSON.stringify({ question: q, mode: "kb", k: 4 }),
-  });
-  if (!resp.ok) { $("answer").textContent = "Query failed (HTTP " + resp.status + ")."; return; }
+  asking = true;
+  let resp;
+  try {
+    resp = await fetch(cfg.serverUrl.replace(/\/$/, "") + "/api/v1/query", {
+      method: "POST", headers: apiHeaders(cfg),
+      body: JSON.stringify({ question: q, mode: "kb", k: 4 }),
+    });
+  } catch {
+    asking = false;
+    $("answer").textContent = "Could not reach your server.";
+    return;
+  }
+  if (!resp.ok) {
+    asking = false;
+    let detail = "";
+    try { detail = errDetail(await resp.json()); } catch {}
+    $("answer").textContent = detail || "Query failed (HTTP " + resp.status + ").";
+    return;
+  }
   $("answer").textContent = "";
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  try {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -217,6 +293,11 @@ $("question").addEventListener("keydown", async (e) => {
           sources.map((s, i) => `[${i + 1}] ${s.title}`).join("  ");
       }
     }
+  }
+  } catch {
+    $("answer").textContent += "  … connection lost mid-answer.";
+  } finally {
+    asking = false;
   }
 });
 

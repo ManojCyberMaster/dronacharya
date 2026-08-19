@@ -1,6 +1,6 @@
 // To-dos — tiny documents (source_type="todo") in the knowledge base:
 // synced, searchable, exported/wiped like everything else.
-const { headers, esc, toast } = window.DC;
+const { headers, esc, toast, req } = window.DC;
 
 const listEl = document.getElementById("td-list");
 const showDone = document.getElementById("td-show-done");
@@ -17,17 +17,15 @@ function dueLabel(due) {
 }
 
 async function load() {
-  let resp;
-  try {
-    resp = await fetch("/api/v1/todos?" + new URLSearchParams(
-      { include_done: showDone.checked ? "true" : "false" }),
-      { headers: headers(false) });
-  } catch { listEl.innerHTML = '<div class="card muted">Server unreachable.</div>'; return; }
-  if (resp.status === 401) {
-    listEl.innerHTML = '<div class="card muted">Invalid token — set it from the sidebar.</div>';
+  const r = await req("/api/v1/todos?" + new URLSearchParams(
+    { include_done: showDone.checked ? "true" : "false" }), { quiet: true });
+  if (!r.ok) {
+    listEl.innerHTML = `<div class="card muted">${
+      r.auth ? "Invalid token — set it from the sidebar."
+             : "Could not load your to-dos — " + esc(r.error)}</div>`;
     return;
   }
-  const { todos } = await resp.json();
+  const todos = r.data.todos || [];
   listEl.innerHTML = todos.length ? "" :
     '<div class="card muted">Nothing pending 🎉 — add one above.</div>';
   todos.forEach(t => {
@@ -46,8 +44,12 @@ async function load() {
     card.querySelector(".td-text").textContent = t.text;
     if (t.done) card.querySelector(".td-text").style.textDecoration = "line-through";
     card.querySelector("input[type=checkbox]").onchange = async (e) => {
-      await fetch(`/api/v1/todos/${t.id}`, { method: "PATCH", headers: headers(),
-        body: JSON.stringify({ done: e.target.checked }) });
+      const want = e.target.checked;
+      const res = await req(`/api/v1/todos/${t.id}`, { method: "PATCH",
+        body: JSON.stringify({ done: want }) });
+      // on failure the box used to silently un-tick itself on reload, with no
+      // hint that anything had gone wrong
+      if (!res.ok) { e.target.checked = !want; return; }
       load();
     };
     card.querySelector(".ghost").onclick = () => {   // inline edit, in place
@@ -64,8 +66,13 @@ async function load() {
         settled = true;
         const text = input.value.trim();
         if (text && text !== t.text) {
-          await fetch(`/api/v1/todos/${t.id}`, { method: "PATCH",
-            headers: headers(), body: JSON.stringify({ text }) });
+          const res = await req(`/api/v1/todos/${t.id}`, { method: "PATCH",
+            body: JSON.stringify({ text }) });
+          if (!res.ok) {   // keep the typed text on screen so it isn't lost
+            settled = false;
+            input.focus();
+            return;
+          }
         }
         load();
       };
@@ -76,8 +83,8 @@ async function load() {
       input.addEventListener("blur", commit);
     };
     card.querySelector(".danger").onclick = async () => {
-      await fetch(`/api/v1/documents/${t.id}`, { method: "DELETE",
-                                                 headers: headers(false) });
+      const res = await req(`/api/v1/documents/${t.id}`, { method: "DELETE" });
+      if (!res.ok) return;
       toast("To-do deleted");
       load();
     };
@@ -85,16 +92,23 @@ async function load() {
   });
 }
 
+let adding = false;
 async function add() {
-  const text = document.getElementById("td-text").value.trim();
+  if (adding) return;
+  const textEl = document.getElementById("td-text");
+  const dueEl = document.getElementById("td-due");
+  const text = textEl.value.trim();
   if (!text) return;
-  const dueLocal = document.getElementById("td-due").value;
-  const due = dueLocal ? new Date(dueLocal).toISOString() : null;
-  document.getElementById("td-text").value = "";
-  document.getElementById("td-due").value = "";
-  const r = await fetch("/api/v1/todos", { method: "POST", headers: headers(),
+  const due = dueEl.value ? new Date(dueEl.value).toISOString() : null;
+  adding = true;
+  const r = await req("/api/v1/todos", { method: "POST",
     body: JSON.stringify({ text, due }) });
-  if (!r.ok) { toast("Could not add — check the token", "error"); return; }
+  adding = false;
+  // clear the inputs only once the to-do actually exists — clearing first
+  // meant a rejected or offline add threw the typed text away silently
+  if (!r.ok) return;
+  textEl.value = "";
+  dueEl.value = "";
   load();
 }
 document.getElementById("td-add").onclick = add;

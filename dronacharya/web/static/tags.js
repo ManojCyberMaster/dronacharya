@@ -1,7 +1,7 @@
 // Tags — semantic word map. Server supplies 2D positions (PCA over the KB's
 // own embeddings) + clusters; here we color, size, de-overlap and render.
 // The map pans (drag) and zooms (wheel / buttons) inside its own frame.
-const { headers, esc, modal, toast, openDocument } = window.DC;
+const { headers, esc, modal, toast, openDocument, req, knownTags } = window.DC;
 
 const wrap = document.getElementById("tagmap-wrap");
 const stage = document.getElementById("tagmap");
@@ -168,12 +168,12 @@ async function tagModal(name, count) {
       label: `Rename "${name}" everywhere to:`, value: name, okText: "Rename",
       onOk: async (to) => {
         if (to === name) return;
-        const r = await fetch("/api/v1/tags/rename", {
-          method: "POST", headers: headers(),
+        const r = await req("/api/v1/tags/rename", { method: "POST",
           body: JSON.stringify({ old: name, new: to }) });
-        if (!r.ok) { toast("Rename failed", "error"); return; }
-        const out = await r.json();
+        if (!r.ok) return;              // req surfaced the server's own reason
+        const out = r.data;
         toast(`Renamed on ${out.documents} document${out.documents === 1 ? "" : "s"}`);
+        knownTags(true);                // app-wide suggestions still offered the old name
         m.close(); load();
       },
     });
@@ -181,17 +181,21 @@ async function tagModal(name, count) {
   tools.querySelector("#tg-del").onclick = async () => {
     if (!confirm(`Remove tag "${name}" from all ${count} item${count === 1 ? "" : "s"}?\n` +
                  "The knowledge itself stays — only the tag goes away.")) return;
-    const r = await fetch("/api/v1/tags/delete", {
-      method: "POST", headers: headers(), body: JSON.stringify({ name }) });
-    if (!r.ok) { toast("Delete failed", "error"); return; }
+    const r = await req("/api/v1/tags/delete", { method: "POST",
+      body: JSON.stringify({ name }) });
+    if (!r.ok) return;
     toast(`Tag "${name}" removed`);
+    knownTags(true);                    // drop it from app-wide suggestions too
     m.close(); load();
   };
 
-  const resp = await fetch("/api/v1/documents?" + new URLSearchParams(
-    { tag: name, limit: "200" }), { headers: headers(false) });
-  if (!resp.ok) { body.innerHTML = `<div class="muted">could not load</div>`; return; }
-  const { documents } = await resp.json();
+  const listed = await req("/api/v1/documents?" + new URLSearchParams(
+    { tag: name, limit: "200" }), { quiet: true });
+  if (!listed.ok) {
+    body.innerHTML = `<div class="muted">could not load — ${esc(listed.error)}</div>`;
+    return;
+  }
+  const documents = listed.data.documents || [];
   body.innerHTML = "";
   documents.forEach(d => {
     const isMap = (d.capabilities?.editor || d.source_type) === "mindmap";
@@ -218,16 +222,15 @@ async function tagModal(name, count) {
 // -------------------------------------------------------------------- load --
 async function load() {
   stage.innerHTML = `<div class="muted" style="padding:20px">computing the map…</div>`;
-  let resp;
-  try {
-    resp = await fetch("/api/v1/tags/map", { headers: headers(false) });
-  } catch { stage.innerHTML = `<div class="muted" style="padding:20px">server unreachable</div>`; return; }
-  if (resp.status === 401) {
-    stage.innerHTML = `<div class="muted" style="padding:20px">Invalid token — set it from the sidebar.</div>`;
+  const r = await req("/api/v1/tags/map", { quiet: true });
+  if (!r.ok) {
+    stage.innerHTML = `<div class="muted" style="padding:20px">${
+      r.auth ? "Invalid token — set it from the sidebar."
+             : "could not build the map — " + esc(r.error)}</div>`;
     return;
   }
-  const data = await resp.json();
-  if (!data.tags.length) {
+  const data = r.data;
+  if (!(data.tags || []).length) {
     stage.innerHTML = `<div class="muted" style="padding:20px">No tags yet —
       tags appear as you save pages, import bookmarks or install a seed kit.</div>`;
     return;

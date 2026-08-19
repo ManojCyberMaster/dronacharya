@@ -126,7 +126,7 @@ def save_mindmap(repo, embedder, data: dict, *, document_id: str | None = None,
     # node tags + optional map-level tag → the app-wide tag namespace
     tags = map_level_tags(data)
     tags += [t for t in tag_nodes if t not in tags]
-    if sorted(tags) != sorted(repo.get_tags(doc.id)):   # avoid oplog churn
-        repo.set_tags(doc.id, tags)
+    # part of this save: the insert/replace above already ticked the version
+    repo.set_tags(doc.id, tags, bump_version=False)   # no-ops when unchanged
     repo.log_event("mindmap_saved", {"document_id": doc.id, "nodes": len(units)})
     return doc

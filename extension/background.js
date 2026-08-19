@@ -20,6 +20,18 @@ function apiHeaders(cfg, json = true) {
   };
 }
 
+// FastAPI sends `detail` as a string OR a list of {msg, loc} objects — shown
+// raw the latter renders as "[object Object]".
+function errDetail(body) {
+  const d = body && body.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d))
+    return d.map(e => (e && typeof e === "object") ? (e.msg || JSON.stringify(e))
+                                                   : String(e)).join("; ");
+  if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+  return "";
+}
+
 function capturePage() {
   // runs in the page context
   return {
@@ -495,29 +507,59 @@ async function handleReviewAction(tabId, msg) {
   if (msg.action === "upload") return startSave(tabId, false);
   if (msg.action === "overwrite") return startSave(tabId, true);
   if (msg.action === "discard") {
-    if (flow.docId)
-      await fetch(base + "/api/v1/documents/" + flow.docId,
-        { method: "DELETE", headers: apiHeaders(cfg, false) }).catch(() => {});
+    if (flow.docId) {
+      let gone = false;
+      try {
+        const r = await fetch(base + "/api/v1/documents/" + flow.docId,
+          { method: "DELETE", headers: apiHeaders(cfg, false) });
+        gone = r.ok;
+      } catch { gone = false; }
+      if (!gone) {
+        // "nothing kept" while the document is still in the KB is a lie the
+        // user has no way to notice
+        return showOverlay(tabId, { phase: "error",
+          detail: "Could not remove the saved page — it is still in your "
+                  + "knowledge base. Delete it from the Library." });
+      }
+    }
     flows.delete(tabId);
     return showOverlay(tabId, { phase: "done", label: "Save discarded — nothing kept" });
   }
   if (msg.action === "keep") {
+    // These carry the user's REVIEWED edits. Swallowing a failure here and
+    // showing a checkmark threw that work away with no trace — say so instead
+    // and keep the flow open so nothing typed is lost.
+    const failed = async (what, resp) => {
+      let detail = "";
+      try { detail = errDetail(await resp.json()); } catch {}
+      return showOverlay(tabId, { phase: "error",
+        detail: `Your ${what} could not be saved${detail ? " — " + detail : ""}. `
+                + "The page itself is saved; try Keep again." });
+    };
     try {
       if (flow.docId && typeof msg.summary === "string"
-          && msg.summary !== flow.summary)   // empty = deliberate clearing
-        await fetch(base + "/api/v1/documents/" + flow.docId, {
+          && msg.summary !== flow.summary) {  // empty = deliberate clearing
+        const r = await fetch(base + "/api/v1/documents/" + flow.docId, {
           method: "PATCH", headers: apiHeaders(cfg),
           body: JSON.stringify({ summary: msg.summary }),
         });
+        if (!r.ok) return failed("edited summary", r);
+      }
       const unitsChanged = Array.isArray(msg.units) && msg.units.length
         && (msg.units.length !== (flow.unitTexts || []).length
             || msg.units.some((u, i) => u.text !== flow.unitTexts[i]));
-      if (flow.docId && unitsChanged)
-        await fetch(base + "/api/v1/documents/" + flow.docId + "/units", {
+      if (flow.docId && unitsChanged) {
+        const r = await fetch(base + "/api/v1/documents/" + flow.docId + "/units", {
           method: "PUT", headers: apiHeaders(cfg),
           body: JSON.stringify({ units: msg.units }),
         });
-    } catch {}
+        if (!r.ok) return failed("edited sections", r);
+      }
+    } catch {
+      return showOverlay(tabId, { phase: "error",
+        detail: "Could not reach your server to save those edits — "
+                + "the page itself is saved; try Keep again." });
+    }
     flows.delete(tabId);
     return showOverlay(tabId, { phase: "done", label: "✓ In your knowledge base" });
   }

@@ -61,7 +61,12 @@ CREATE TABLE IF NOT EXISTS knowledge_units (
   kind TEXT NOT NULL,
   heading_path TEXT, lang TEXT,
   embedding vector({EMBEDDING_DIM}),
-  tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(heading_path, '') || ' ' || text)) STORED
+  -- doc_title is denormalized from documents.title so the generated tsv can
+  -- cover it (a generated column cannot reach another table). SQLite's FTS
+  -- indexes the title the same way; without it the two backends return
+  -- different results for a title-only match on the same corpus.
+  doc_title TEXT,
+  tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(heading_path, '') || ' ' || text || ' ' || coalesce(doc_title, ''))) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_units_doc ON knowledge_units(document_id);
 CREATE INDEX IF NOT EXISTS idx_units_tsv ON knowledge_units USING GIN (tsv);
@@ -91,7 +96,12 @@ CREATE TABLE IF NOT EXISTS oplog (
 
 CREATE TABLE IF NOT EXISTS deletions (
   tenant_id TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL,
-  deleted_at TEXT NOT NULL, PRIMARY KEY (tenant_id, entity, entity_id)
+  deleted_at TEXT NOT NULL,
+  -- the document's version at the moment it was deleted. The merge compares
+  -- THIS (a logical clock) rather than deleted_at, so wall-clock skew between
+  -- devices can never resurrect a deleted document. 0 = unknown (legacy row).
+  version INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, entity, entity_id)
 );
 
 CREATE TABLE IF NOT EXISTS sync_conflicts (
@@ -202,17 +212,30 @@ class PostgresRepo:
         cur.execute("SELECT version FROM schema_version")
         row = cur.fetchone()
         if row is None:
-            cur.execute("INSERT INTO schema_version (version) VALUES (2)")
-        elif int(row[0]) < 2:
-            # v2: FTS covers heading context too — rebuild the generated col
+            cur.execute("INSERT INTO schema_version (version) VALUES (3)")
+        elif int(row[0]) < 3:
+            # v2: FTS covers heading context too.
+            # v3: FTS also covers the document title and uses the 'english'
+            #     config, matching SQLite's units_fts (title column + porter
+            #     stemmer) — without this the same query returns different
+            #     results on the laptop and on the home server.
             cur.execute("ALTER TABLE knowledge_units DROP COLUMN IF EXISTS tsv")
+            cur.execute("ALTER TABLE knowledge_units"
+                        " ADD COLUMN IF NOT EXISTS doc_title TEXT")
+            cur.execute("UPDATE knowledge_units u SET doc_title = d.title"
+                        " FROM documents d WHERE d.id = u.document_id")
             cur.execute(
                 "ALTER TABLE knowledge_units ADD COLUMN tsv tsvector"
-                " GENERATED ALWAYS AS (to_tsvector('simple',"
-                " coalesce(heading_path, '') || ' ' || text)) STORED")
+                " GENERATED ALWAYS AS (to_tsvector('english',"
+                " coalesce(heading_path, '') || ' ' || text"
+                " || ' ' || coalesce(doc_title, ''))) STORED")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_units_tsv"
                         " ON knowledge_units USING GIN (tsv)")
-            cur.execute("UPDATE schema_version SET version = 2")
+            # version-stamped tombstones: pre-existing rows keep 0, the
+            # "unknown" sentinel the merge treats as an unconditional block
+            cur.execute("ALTER TABLE deletions"
+                        " ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0")
+            cur.execute("UPDATE schema_version SET version = 3")
         cur.execute(
             "INSERT INTO tenants (id, name, created_at) VALUES (%s,%s,%s)"
             " ON CONFLICT (id) DO NOTHING",
@@ -272,11 +295,12 @@ class PostgresRepo:
         for unit, emb in zip(units, embeddings, strict=True):
             cur.execute(
                 "INSERT INTO knowledge_units (id, document_id, tenant_id, seq, text,"
-                " kind, heading_path, lang, embedding)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CAST(%s AS vector))",
+                " kind, heading_path, lang, embedding, doc_title)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CAST(%s AS vector),%s)",
                 (unit.id, doc.id, unit.tenant_id, unit.seq, unit.text, unit.kind,
                  unit.heading_path, unit.lang,
-                 _vec(emb) if emb else None),   # vector-less until reembed
+                 _vec(emb) if emb else None,   # vector-less until reembed
+                 doc.title),
             )
 
     def insert_document(self, doc: Document, units: list[KnowledgeUnit],
@@ -291,6 +315,10 @@ class PostgresRepo:
              json.dumps(doc.meta), doc.created_at, doc.updated_at),
         )
         self._insert_units(cur, doc, units, embeddings)
+        # a document that exists again must not carry a live tombstone: sync
+        # turns any op on a tombstoned id into a DELETE for every peer, so a
+        # stale tombstone would re-destroy this document across all devices
+        self._clear_deletion(cur, doc.id)
         self._oplog(cur, "document", doc.id, "upsert")
         self.conn.commit()
 
@@ -311,6 +339,7 @@ class PostgresRepo:
         )
         cur.execute("DELETE FROM knowledge_units WHERE document_id = %s", (doc.id,))
         self._insert_units(cur, doc, units, embeddings)
+        self._clear_deletion(cur, doc.id)   # see insert_document
         self._oplog(cur, "document", doc.id, "upsert")
         self.conn.commit()
 
@@ -320,6 +349,10 @@ class PostgresRepo:
         cur = self.conn.cursor()
         if title is not None:
             cur.execute("UPDATE documents SET title=%s WHERE id=%s", (title, document_id))
+            # keep the denormalized copy the FTS vector is generated from in
+            # step, or the OLD title keeps matching and the new one never does
+            cur.execute("UPDATE knowledge_units SET doc_title=%s WHERE document_id=%s",
+                        (title, document_id))
         if saved_note is not None:
             cur.execute("UPDATE documents SET saved_note=%s WHERE id=%s",
                         (saved_note, document_id))
@@ -333,15 +366,17 @@ class PostgresRepo:
 
     def delete_document(self, document_id: str) -> bool:
         cur = self.conn.cursor()
-        cur.execute("SELECT 1 FROM documents WHERE id=%s", (document_id,))
-        if cur.fetchone() is None:
+        cur.execute("SELECT version FROM documents WHERE id=%s", (document_id,))
+        row = cur.fetchone()
+        if row is None:
             return False
         cur.execute("DELETE FROM documents WHERE id=%s", (document_id,))
         cur.execute(
-            "INSERT INTO deletions (tenant_id, entity, entity_id, deleted_at)"
-            " VALUES (%s,%s,%s,%s) ON CONFLICT (tenant_id, entity, entity_id)"
-            " DO UPDATE SET deleted_at = EXCLUDED.deleted_at",
-            (LOCAL_TENANT, "document", document_id, utcnow()),
+            "INSERT INTO deletions (tenant_id, entity, entity_id, deleted_at, version)"
+            " VALUES (%s,%s,%s,%s,%s) ON CONFLICT (tenant_id, entity, entity_id)"
+            " DO UPDATE SET deleted_at = EXCLUDED.deleted_at,"
+            " version = EXCLUDED.version",
+            (LOCAL_TENANT, "document", document_id, utcnow(), int(row[0])),
         )
         self._oplog(cur, "document", document_id, "delete")
         self.conn.commit()
@@ -392,8 +427,8 @@ class PostgresRepo:
             return []
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT rid, ts_rank(tsv, to_tsquery('simple', %s)) AS r"
-            " FROM knowledge_units WHERE tsv @@ to_tsquery('simple', %s)"
+            "SELECT rid, ts_rank(tsv, to_tsquery('english', %s)) AS r"
+            " FROM knowledge_units WHERE tsv @@ to_tsquery('english', %s)"
             " ORDER BY r DESC LIMIT %s",
             (q, q, limit),
         )
@@ -426,18 +461,40 @@ class PostgresRepo:
         return out
 
     # ------------------------------------------------------------------- tags
-    def set_tags(self, document_id: str, tags: list[str]) -> None:
+    def set_tags(self, document_id: str, tags: list[str], *,
+                 bump_version: bool = True) -> None:
+        """bump_version=False when the caller has just inserted/replaced the
+        document (its own version bump already covers these tags) or is the sync
+        merge (the version came from the merge decision). True for a STANDALONE
+        tag edit, which needs its own logical-clock tick to propagate."""
+        wanted = sorted({t.strip() for t in tags if t.strip()})
+        if wanted == self.get_tags(document_id):
+            return                      # no change: never bump, never re-oplog
         cur = self.conn.cursor()
+        if bump_version:
+            # a tag edit is a document change: without a version bump the merge
+            # has no logical clock for it and can only ever union the two sides,
+            # which makes tag REMOVAL impossible to propagate (it grows back)
+            cur.execute("UPDATE documents SET version = version + 1, updated_at = %s"
+                        " WHERE id = %s", (utcnow(), document_id))
         cur.execute("DELETE FROM document_tags WHERE document_id = %s", (document_id,))
-        for name in {t.strip() for t in tags if t.strip()}:
-            cur.execute(
-                "INSERT INTO tags (tenant_id, name) VALUES (%s,%s)"
-                " ON CONFLICT (tenant_id, name) DO NOTHING",
-                (LOCAL_TENANT, name),
-            )
-            cur.execute("SELECT id FROM tags WHERE tenant_id=%s AND LOWER(name)=LOWER(%s)",
-                        (LOCAL_TENANT, name))
-            tag_id = cur.fetchone()[0]
+        for name in wanted:
+            # match case-INSENSITIVELY first (SQLite stores tag names COLLATE
+            # NOCASE): otherwise "ML" and "ml" become two rows here and one
+            # there, splitting counts and picking an arbitrary id per call
+            cur.execute("SELECT id FROM tags WHERE tenant_id=%s AND LOWER(name)=LOWER(%s)"
+                        " ORDER BY id LIMIT 1", (LOCAL_TENANT, name))
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "INSERT INTO tags (tenant_id, name) VALUES (%s,%s)"
+                    " ON CONFLICT (tenant_id, name) DO NOTHING",
+                    (LOCAL_TENANT, name),
+                )
+                cur.execute("SELECT id FROM tags WHERE tenant_id=%s AND LOWER(name)=LOWER(%s)"
+                            " ORDER BY id LIMIT 1", (LOCAL_TENANT, name))
+                row = cur.fetchone()
+            tag_id = row[0]
             cur.execute(
                 "INSERT INTO document_tags (document_id, tag_id) VALUES (%s,%s)"
                 " ON CONFLICT DO NOTHING",
@@ -557,6 +614,33 @@ class PostgresRepo:
         row = cur.fetchone()
         return row[0] if row else None
 
+    def get_deletion_record(self, entity_id: str) -> tuple[str, int] | None:
+        """(deleted_at, version_at_deletion) — version 0 means 'unknown', a
+        tombstone written before versions were stamped."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT deleted_at, version FROM deletions WHERE tenant_id=%s"
+                    " AND entity='document' AND entity_id=%s", (LOCAL_TENANT, entity_id))
+        row = cur.fetchone()
+        return (row[0], int(row[1])) if row else None
+
+    def _clear_deletion(self, cur, entity_id: str) -> None:
+        cur.execute("DELETE FROM deletions WHERE tenant_id=%s AND entity='document'"
+                    " AND entity_id=%s", (LOCAL_TENANT, entity_id))
+
+    def clear_deletion(self, entity_id: str) -> None:
+        """Drop a tombstone (an explicit restore). Callers that re-create the
+        document go through insert/replace_document, which clear it already."""
+        cur = self.conn.cursor()
+        self._clear_deletion(cur, entity_id)
+        self.conn.commit()
+
+    def rollback(self) -> None:
+        """Discard a half-applied mutation so the next commit cannot persist it."""
+        try:
+            self.conn.rollback()
+        except Exception:  # noqa: BLE001 — nothing useful to do if this fails
+            pass
+
     def record_conflict(self, document_id: str, losing_payload: dict, rule: str) -> None:
         cur = self.conn.cursor()
         cur.execute(
@@ -580,6 +664,12 @@ class PostgresRepo:
                     (device_id,))
         row = cur.fetchone()
         return (int(row[0]), int(row[1])) if row else (0, 0)
+
+    def list_devices(self) -> list[dict]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM devices ORDER BY last_seen DESC")
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
 
     def device_update(self, device_id: str, *, name: str = "",
                       push_seq: int | None = None, pull_seq: int | None = None) -> None:
@@ -718,17 +808,22 @@ class PostgresRepo:
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
         n = int(cur.fetchone()[0])
-        cur.execute("SELECT id FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
-        for (doc_id,) in cur.fetchall():
+        cur.execute("SELECT id, version FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
+        for doc_id, doc_version in cur.fetchall():
             cur.execute(
-                "INSERT INTO deletions (tenant_id, entity, entity_id, deleted_at)"
-                " VALUES (%s,%s,%s,%s) ON CONFLICT (tenant_id, entity, entity_id)"
-                " DO UPDATE SET deleted_at = EXCLUDED.deleted_at",
-                (LOCAL_TENANT, "document", doc_id, utcnow()),
+                "INSERT INTO deletions (tenant_id, entity, entity_id, deleted_at, version)"
+                " VALUES (%s,%s,%s,%s,%s) ON CONFLICT (tenant_id, entity, entity_id)"
+                " DO UPDATE SET deleted_at = EXCLUDED.deleted_at,"
+                " version = EXCLUDED.version",
+                (LOCAL_TENANT, "document", doc_id, utcnow(), int(doc_version)),
             )
             self._oplog(cur, "document", doc_id, "delete")
         cur.execute("DELETE FROM documents WHERE tenant_id = %s", (LOCAL_TENANT,))
-        cur.execute("DELETE FROM tags WHERE tenant_id = %s", (LOCAL_TENANT,))
+        # document_tags cascaded with the documents; drop only the tag rows no
+        # surviving document still carries, so the two backends agree on what a
+        # wipe leaves behind.
+        cur.execute("DELETE FROM tags WHERE id NOT IN"
+                    " (SELECT tag_id FROM document_tags)")
         cur.execute("DELETE FROM sync_state")
         if factory:
             for table in ("events", "oplog", "deletions", "sync_conflicts",

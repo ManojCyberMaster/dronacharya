@@ -47,7 +47,9 @@ class QueryBody(BaseModel):
 
 
 class FindBody(BaseModel):
-    question: str = Field(max_length=1000)
+    # same web-UI question box as /ask — keep the caps identical or a question
+    # that is fine to ask becomes a 422 the moment "find all" is used
+    question: str = Field(max_length=4000)
 
 
 class AskBody(BaseModel):
@@ -63,7 +65,9 @@ class AskSaveBody(BaseModel):
 
 
 class PatchDocBody(BaseModel):
-    title: str | None = None
+    # title cap matches NoteBody.title: a longer title set here would otherwise
+    # make every later save of the same document in the note editor a 422
+    title: str | None = Field(None, max_length=200)
     saved_note: str | None = None
     summary: str | None = None
     tags: list[str] | None = None
@@ -75,7 +79,7 @@ class TodoBody(BaseModel):
 
 
 class TodoPatchBody(BaseModel):
-    text: str | None = None
+    text: str | None = Field(None, max_length=2000)   # same cap as create
     due: str | None = None
     clear_due: bool = False
     done: bool | None = None
@@ -94,8 +98,13 @@ class NoteBody(BaseModel):
 
 
 class UnitsBody(BaseModel):
-    # full replacement list [{text, kind?, heading_path?}]
-    units: list[dict] = Field(max_length=500)
+    # Full replacement list [{text, kind?, heading_path?}] — the UI sends every
+    # unit to edit or delete ONE of them. Ingest is uncapped (a TDL emits one
+    # unit per task; a long PDF one per page), so a cap here that ingest can
+    # exceed makes every unit of a large document permanently uneditable. Keep
+    # this above anything the parsers realistically produce; MAX_BODY (25 MB)
+    # is the real ceiling.
+    units: list[dict] = Field(max_length=20_000)
 
 
 class GraphBody(BaseModel):
@@ -711,7 +720,10 @@ def tags_map(request: Request):
 # meta["todo"] = {"done": bool, "due": iso-datetime | None}.
 def _todo_json(repo, d):
     todo = (d.meta or {}).get("todo") or {}
-    return {"id": d.id, "text": d.title, "done": bool(todo.get("done")),
+    # the full text lives in meta; d.title is a 300-char DISPLAY truncation and
+    # must never be handed back as the todo's content (see _write_todo)
+    return {"id": d.id, "text": todo.get("text") or d.title,
+            "done": bool(todo.get("done")),
             "due": todo.get("due"), "created_at": d.created_at,
             "updated_at": d.updated_at}
 
@@ -719,11 +731,16 @@ def _todo_json(repo, d):
 def _write_todo(repo, embedder, doc, text, done, due):
     from ..models import KnowledgeUnit
 
+    # title/summary are DISPLAY truncations; the authoritative text is kept
+    # whole in meta. Reading the todo back from the title meant that ticking
+    # "done" (a PATCH with no text) rewrote the unit from the 300-char title
+    # and destroyed everything past it — text, search index and embedding.
     doc.title = text[:300]
     doc.summary = ("✓ done — " if done else "to-do — ") + text[:200]
     doc.distilled = True
     doc.distill_tier = "user-content"
-    doc.meta = {**(doc.meta or {}), "todo": {"done": done, "due": due}}
+    doc.meta = {**(doc.meta or {}),
+                "todo": {"done": done, "due": due, "text": text}}
     units = [KnowledgeUnit(document_id=doc.id, seq=0, kind="note",
                            text=f"To-do: {text}")]
     embeddings = embedder.embed_passages([unit_index_text(units[0])])
@@ -775,7 +792,8 @@ def patch_todo(request: Request, document_id: str, body: TodoPatchBody):
             if doc is None or doc.source_type != "todo":
                 return JSONResponse({"detail": "not found"}, status_code=404)
             todo = (doc.meta or {}).get("todo") or {}
-            text = body.text.strip() if body.text is not None else doc.title
+            text = (body.text.strip() if body.text is not None
+                    else (todo.get("text") or doc.title))
             done = body.done if body.done is not None else bool(todo.get("done"))
             due = None if body.clear_due else (
                 body.due if body.due is not None else todo.get("due"))

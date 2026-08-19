@@ -49,13 +49,20 @@ def _auto_sync(config, repo) -> None:
     from .sync.client import maybe_auto_sync
 
     report = maybe_auto_sync(
-        repo, config,
+        repo, config, quiet=False,
         on_start=lambda: console.print(
             "[dim]auto-sync with your server (pulled changes re-embed "
-            "locally — can take a while after big imports)…[/dim]"))
+            "locally — can take a while after big imports)…[/dim]"),
+        # a sync that keeps failing used to be completely invisible
+        on_error=lambda exc: console.print(
+            f"[yellow]auto-sync failed:[/yellow] {exc} [dim](retrying later; "
+            f"`dc sync` for detail)[/dim]"))
     if report and (report.pushed or report.pulled or report.deleted):
         console.print(f"[dim]auto-synced: +{report.pulled} from server, "
                       f"{report.pushed} pushed[/dim]")
+    if report and report.failed:
+        console.print(f"[yellow]{report.failed} change(s) from the server could "
+                      f"not be applied[/yellow] [dim]— see `dc conflicts`[/dim]")
 
 
 @app.command()
@@ -550,11 +557,18 @@ def note(
     config = load_config()
     # client role: the home server has WARM models — a note lands in ~a
     # second instead of paying local embedder warm-up + sync on every jot
-    from .client import remote_api
+    from .client import RemoteRejected, remote_api
 
-    remote = remote_api(config, "/notes",
-                        {"title": title, "content": content,
-                         "format": "markdown", "tags": tag or None})
+    try:
+        remote = remote_api(config, "/notes",
+                            {"title": title, "content": content,
+                             "format": "markdown", "tags": tag or None})
+    except RemoteRejected as e:
+        # the server REFUSED it (e.g. too long). Writing it locally anyway would
+        # print "noted" for a note the server will never accept — and sync would
+        # carry it there regardless, where the editor could never save it again.
+        console.print(f"[red]Server rejected this note:[/red] {e.detail}")
+        raise typer.Exit(1) from e
     if remote is not None:
         console.print(f"[green]noted[/green]: {remote.get('title', '')} "
                       "[dim](via server — reaches this device on next sync)[/dim]")
@@ -914,9 +928,12 @@ def doctor():
         if not config.server.remote_url:
             row(False, "home server", "role=client but server.remote_url is empty")
         else:
-            from .client import remote_api
-            out = remote_api(config, "/search", {"query": "doctor", "k": 1},
-                             timeout=10)
+            from .client import RemoteRejected, remote_api
+            try:
+                out = remote_api(config, "/search", {"query": "doctor", "k": 1},
+                                 timeout=10)
+            except RemoteRejected:
+                out = None   # reachable but refusing (bad token?) — not healthy
             row(out is not None, "home server", config.server.remote_url
                 + ("" if out is not None else " unreachable or bad token"))
 

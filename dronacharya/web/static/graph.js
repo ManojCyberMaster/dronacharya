@@ -1,5 +1,5 @@
 // Connected-facts graph — cytoscape (MIT, vendored) over /api/v1/graph.
-const { headers, esc, toast } = window.DC;
+const { headers, esc, toast, req } = window.DC;
 
 const info = document.getElementById("graph-info");
 let cy = null;
@@ -63,13 +63,12 @@ function render(graph) {
 async function go() {
   const q = document.getElementById("gq").value.trim();
   if (!q) return;
-  let resp;
-  try {
-    resp = await fetch("/api/v1/graph", { method: "POST", headers: headers(),
-                                          body: JSON.stringify({ query: q }) });
-  } catch { toast("Server unreachable", "error"); return; }
-  if (resp.status === 401) { toast("Set your API token from the sidebar first", "error"); return; }
-  const graph = await resp.json();
+  // a 422/500 used to fall through to the empty-graph message below, so a
+  // server error was indistinguishable from "nothing matched"
+  const r = await req("/api/v1/graph", { method: "POST",
+                                         body: JSON.stringify({ query: q }) });
+  if (!r.ok) return;
+  const graph = r.data;
   if (!graph.nodes || !graph.nodes.length) {
     document.getElementById("cy").innerHTML =
       `<div class="muted" style="padding:30px">No connected knowledge found for that query.</div>`;

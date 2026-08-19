@@ -90,7 +90,12 @@ CREATE TABLE IF NOT EXISTS oplog (
 
 CREATE TABLE IF NOT EXISTS deletions (
   tenant_id TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL,
-  deleted_at TEXT NOT NULL, PRIMARY KEY (tenant_id, entity, entity_id)
+  deleted_at TEXT NOT NULL,
+  -- the document's version at the moment it was deleted. The merge compares
+  -- THIS (a logical clock) rather than deleted_at, so wall-clock skew between
+  -- devices can never resurrect a deleted document.
+  version INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, entity, entity_id)
 );
 
 CREATE TABLE IF NOT EXISTS sync_conflicts (
@@ -176,6 +181,12 @@ class SqliteRepo:
         cols = {r[1] for r in cur.execute("PRAGMA table_info(oplog)").fetchall()}
         if "origin" not in cols:
             cur.execute("ALTER TABLE oplog ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'")
+        # version-stamped tombstones (see the deletions DDL). Pre-existing rows
+        # keep version 0, the "unknown" sentinel the merge treats as an
+        # unconditional block — we cannot know what version they buried.
+        dcols = {r[1] for r in cur.execute("PRAGMA table_info(deletions)").fetchall()}
+        if "version" not in dcols:
+            cur.execute("ALTER TABLE deletions ADD COLUMN version INTEGER NOT NULL DEFAULT 0")
         cur.execute(
             "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (?, ?, ?)",
             (LOCAL_TENANT, "Local", utcnow()),
@@ -282,6 +293,10 @@ class SqliteRepo:
              json.dumps(doc.meta), doc.created_at, doc.updated_at),
         )
         self._insert_units(cur, doc, units, embeddings)
+        # a document that exists again must not carry a live tombstone: sync
+        # turns any op on a tombstoned id into a DELETE for every peer, so a
+        # stale tombstone would re-destroy this document across all devices
+        self._clear_deletion(cur, doc.id)
         self._oplog(cur, "document", doc.id, "upsert")
         self.conn.commit()
 
@@ -304,6 +319,7 @@ class SqliteRepo:
         )
         self._delete_units(cur, doc.id)
         self._insert_units(cur, doc, units, embeddings)
+        self._clear_deletion(cur, doc.id)   # see insert_document
         self._oplog(cur, "document", doc.id, "upsert")
         self.conn.commit()
 
@@ -314,6 +330,13 @@ class SqliteRepo:
         cur = self.conn.cursor()
         if title is not None:
             cur.execute("UPDATE documents SET title=? WHERE id=?", (title, document_id))
+            # units_fts carries a copy of the title per unit (it is searchable);
+            # without this the OLD title keeps matching and the new one never does
+            for row in cur.execute(
+                "SELECT rid FROM knowledge_units WHERE document_id = ?", (document_id,)
+            ).fetchall():
+                cur.execute("UPDATE units_fts SET title=? WHERE rowid=?",
+                            (title, row[0]))
         if saved_note is not None:
             cur.execute("UPDATE documents SET saved_note=? WHERE id=?", (saved_note, document_id))
         if summary is not None:
@@ -327,14 +350,16 @@ class SqliteRepo:
 
     def delete_document(self, document_id: str) -> bool:
         cur = self.conn.cursor()
-        if cur.execute("SELECT 1 FROM documents WHERE id=?", (document_id,)).fetchone() is None:
+        row = cur.execute("SELECT version FROM documents WHERE id=?",
+                          (document_id,)).fetchone()
+        if row is None:
             return False
         self._delete_units(cur, document_id)
         cur.execute("DELETE FROM documents WHERE id=?", (document_id,))
         cur.execute(
-            "INSERT OR REPLACE INTO deletions (tenant_id, entity, entity_id, deleted_at)"
-            " VALUES (?,?,?,?)",
-            (LOCAL_TENANT, "document", document_id, utcnow()),
+            "INSERT OR REPLACE INTO deletions (tenant_id, entity, entity_id, deleted_at,"
+            " version) VALUES (?,?,?,?,?)",
+            (LOCAL_TENANT, "document", document_id, utcnow(), int(row["version"])),
         )
         self._oplog(cur, "document", document_id, "delete")
         self.conn.commit()
@@ -421,10 +446,26 @@ class SqliteRepo:
         return out
 
     # ------------------------------------------------------------------- tags
-    def set_tags(self, document_id: str, tags: list[str]) -> None:
+    def set_tags(self, document_id: str, tags: list[str], *,
+                 bump_version: bool = True) -> None:
+        """bump_version=False when the caller has just inserted/replaced the
+        document (its own version bump already covers these tags) or is the sync
+        merge (the version came from the merge decision). True for a STANDALONE
+        tag edit, which needs its own logical-clock tick to propagate."""
+        wanted = sorted({t.strip() for t in tags if t.strip()})
+        if wanted == self.get_tags(document_id):
+            return                      # no change: never bump, never re-oplog
         cur = self.conn.cursor()
+        if bump_version:
+            # a tag edit is a document change: without a version bump the merge
+            # has no logical clock for it and can only ever union the two sides,
+            # which makes tag REMOVAL impossible to propagate (it grows back)
+            cur.execute(
+                "UPDATE documents SET version = version + 1, updated_at = ?"
+                " WHERE id = ?", (utcnow(), document_id),
+            )
         cur.execute("DELETE FROM document_tags WHERE document_id = ?", (document_id,))
-        for name in {t.strip() for t in tags if t.strip()}:
+        for name in wanted:
             cur.execute(
                 "INSERT OR IGNORE INTO tags (tenant_id, name) VALUES (?,?)",
                 (LOCAL_TENANT, name),
@@ -618,21 +659,25 @@ class SqliteRepo:
         n = cur.execute(
             "SELECT COUNT(*) FROM documents WHERE tenant_id = ?", (LOCAL_TENANT,)
         ).fetchone()[0]
+        # every deleted document must leave a tombstone + oplog entry, or it
+        # simply resurrects from the next sync push by a device that still
+        # holds it — a wipe that quietly undoes itself
         for row in cur.execute(
-            "SELECT id FROM documents WHERE tenant_id = ?", (LOCAL_TENANT,)
+            "SELECT id, version FROM documents WHERE tenant_id = ?", (LOCAL_TENANT,)
         ).fetchall():
+            doc_id = row["id"]
             cur.execute(
-                "INSERT OR REPLACE INTO deletions (tenant_id, entity, entity_id, deleted_at)"
-                " VALUES (?,?,?,?)",
-                (LOCAL_TENANT, "document", row["id"], utcnow()),
+                "INSERT OR REPLACE INTO deletions (tenant_id, entity, entity_id, deleted_at,"
+                " version) VALUES (?,?,?,?,?)",
+                (LOCAL_TENANT, "document", doc_id, utcnow(), int(row["version"])),
             )
-            self._oplog(cur, "document", row["id"], "delete")
-        cur.execute("DELETE FROM units_fts")
-        cur.execute("DELETE FROM units_vec")
-        cur.execute("DELETE FROM knowledge_units")
-        cur.execute("DELETE FROM document_tags")
-        cur.execute("DELETE FROM tags")
-        cur.execute("DELETE FROM documents")
+            self._oplog(cur, "document", doc_id, "delete")
+            self._delete_units(cur, doc_id)       # units + FTS + vectors
+            cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        # document_tags cascaded with the documents; drop only the tag rows no
+        # surviving document carries (never every tag row — tags are shared)
+        cur.execute("DELETE FROM tags WHERE id NOT IN"
+                    " (SELECT tag_id FROM document_tags)")
         cur.execute("DELETE FROM sync_state")
         if factory:
             # factory reset: operational data too — events, oplog, tombstones,
@@ -713,6 +758,39 @@ class SqliteRepo:
         ).fetchone()
         return row["deleted_at"] if row else None
 
+    def get_deletion_record(self, entity_id: str) -> tuple[str, int] | None:
+        """(deleted_at, version_at_deletion) — version 0 means 'unknown', a
+        tombstone written before versions were stamped."""
+        row = self.conn.execute(
+            "SELECT deleted_at, version FROM deletions WHERE tenant_id=?"
+            " AND entity='document' AND entity_id=?",
+            (LOCAL_TENANT, entity_id),
+        ).fetchone()
+        return (row["deleted_at"], int(row["version"])) if row else None
+
+    def _clear_deletion(self, cur, entity_id: str) -> None:
+        cur.execute(
+            "DELETE FROM deletions WHERE tenant_id=? AND entity='document'"
+            " AND entity_id=?",
+            (LOCAL_TENANT, entity_id),
+        )
+
+    def clear_deletion(self, entity_id: str) -> None:
+        """Drop a tombstone (an explicit restore). Callers that re-create the
+        document go through insert/replace_document, which clear it already."""
+        cur = self.conn.cursor()
+        self._clear_deletion(cur, entity_id)
+        self.conn.commit()
+
+    def rollback(self) -> None:
+        """Discard a half-applied mutation. Without this a long-lived repo (the
+        CLI, auto-sync) keeps the dirty statements pending and the NEXT
+        unrelated commit persists them — a document updated but its units gone."""
+        try:
+            self.conn.rollback()
+        except Exception:  # noqa: BLE001 — nothing useful to do if this fails
+            pass
+
     def record_conflict(self, document_id: str, losing_payload: dict, rule: str) -> None:
         self.conn.execute(
             "INSERT INTO sync_conflicts (tenant_id, document_id, losing_payload, rule,"
@@ -734,6 +812,10 @@ class SqliteRepo:
             "SELECT last_push_seq, last_pull_seq FROM devices WHERE id = ?", (device_id,)
         ).fetchone()
         return (row["last_push_seq"], row["last_pull_seq"]) if row else (0, 0)
+
+    def list_devices(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM devices ORDER BY last_seen DESC").fetchall()]
 
     def device_update(self, device_id: str, *, name: str = "",
                       push_seq: int | None = None, pull_seq: int | None = None) -> None:

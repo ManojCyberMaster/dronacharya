@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 
+from .ingest.chunking import _HEADING as _HEADING_LINE
 from .models import Document, KnowledgeUnit, SourceType, UnitKind, unit_index_text
 
 # same whitelist as the mind-map note editor (attributes always stripped)
@@ -109,7 +110,8 @@ def _build(repo, embedder, doc: Document, title: str, content: str,
     else:
         repo.replace_document(doc, units, embeddings)
     if tags is not None:
-        repo.set_tags(doc.id, sorted(set(tags)))
+        # part of this save: the insert/replace above already ticked the version
+        repo.set_tags(doc.id, sorted(set(tags)), bump_version=False)
     return doc
 
 
@@ -159,6 +161,27 @@ def _as_markdown_table(text: str) -> str | None:
     return "\n".join(out)
 
 
+def _escape_body(text: str) -> str:
+    r"""Neutralize lines in a unit's TEXT that markdown would read as structure.
+
+    Unit text is body content, not headings — but a line like "# Buy milk"
+    (ordinary in .txt files, TDL comments and PDF text) becomes a real heading
+    when the reconstructed note is re-chunked, and split_markdown_sections()
+    DROPS a heading whose body is empty. That silently destroyed the line: it
+    survived in no unit and no heading_path. Escaping keeps it as body text and
+    renders identically (markdown strips the backslash).
+    """
+    out = []
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("#") and _HEADING_LINE.match(stripped):
+            indent = line[:len(line) - len(stripped)]
+            out.append(f"{indent}\\{stripped}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def _reconstruct_markdown(units) -> str:
     """Rebuild a markdown document from stored heading_path/text — the
     inverse of chunk_document(). Headings are only emitted where the path
@@ -190,7 +213,8 @@ def _reconstruct_markdown(units) -> str:
             lines.append(f"{'#' * min(level, 6)} {name}")
         prev_path = path
         if u.text and u.text.strip():
-            lines.append(_as_markdown_table(u.text) or u.text.strip())
+            lines.append(_as_markdown_table(u.text)
+                         or _escape_body(u.text.strip()))
     return "\n\n".join(lines)
 
 

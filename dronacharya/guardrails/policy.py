@@ -34,7 +34,11 @@ class BasicRules:
     ]
 
     def check(self, text: str, *, title: str = "") -> PolicyDecision:
-        haystack = f"{title}\n{text[:20000]}"
+        # Scan the WHOLE text, like the PII pass does. Capping at 20k chars
+        # meant blocklisted material further into a long page was ingested
+        # normally — a silent, asymmetric hole in a guardrail that is supposed
+        # to be absolute. These are a handful of regexes; the cost is trivial.
+        haystack = f"{title}\n{text}"
         for pattern in self._BLOCK:
             if pattern.search(haystack):
                 return PolicyDecision("block", f"matched {pattern.pattern}")

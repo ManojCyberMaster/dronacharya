@@ -148,6 +148,15 @@ async function ask(mode) {
     return;
   }
   if (resp.status === 401) { answerEl.textContent = "Invalid token — set it from the sidebar (API token)."; return; }
+  if (!resp.ok) {
+    // An error body carries no SSE frames, so feeding it to the reader below
+    // produced an empty answer plus "connection lost mid-answer" — blaming the
+    // network for what the server actually told us.
+    const body = await resp.json().catch(() => ({}));
+    answerEl.textContent = window.DC.errText(body)
+      || `The server could not answer that (HTTP ${resp.status}).`;
+    return;
+  }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -234,7 +243,13 @@ async function findAll() {
   }
   if (resp.status === 401) { answerEl.textContent = "Invalid token — set it from the sidebar (API token)."; return; }
   const info = await resp.json().catch(() => ({}));
-  if (!resp.ok) { answerEl.textContent = info.error || "Could not run the scan."; return; }
+  // validation errors arrive as `detail`, not `error` — reading only `error`
+  // replaced the server's actual message with a generic one
+  if (!resp.ok) {
+    answerEl.textContent = info.error || window.DC.errText(info)
+      || "Could not run the scan.";
+    return;
+  }
   footerEl.textContent = `scanned ${info.scanned} unit(s) · answered by ${info.provider}`;
   if (!info.items || !info.items.length) {
     answerEl.textContent = "No matches found.";

@@ -2,7 +2,7 @@
 // Custom rail panels (layout/theme/style/note/link/outline) — no third-party
 // plugins (license-clean). Node tags share the app-wide tag namespace; notes
 // (per-node, text-only rich text) become searchable knowledge too.
-const { headers, esc, modal, toast, attachTagSuggest, knownTags } = window.DC;
+const { headers, esc, modal, toast, attachTagSuggest, knownTags, errText } = window.DC;
 
 const ME = window.MindElixir && (window.MindElixir.default || window.MindElixir);
 const statusEl = document.getElementById("mm-status");
@@ -121,9 +121,15 @@ function closePops() {
 
 // ------------------------------------------------------------------ list
 async function refreshList() {
-  const resp = await fetch("/api/v1/mindmaps", { headers: headers() });
-  if (resp.status === 401) { setStatus("set your API token (sidebar)"); return; }
-  mapsCache = (await resp.json()).mindmaps || [];
+  const r = await window.DC.req("/api/v1/mindmaps", { quiet: true });
+  if (!r.ok) {
+    // an unchecked failure emptied mapsCache and rendered "No mind maps yet",
+    // which reads as "your maps are gone" rather than "could not load them"
+    setStatus(r.auth ? "set your API token (sidebar)"
+                     : "could not load your maps — " + r.error);
+    return;
+  }
+  mapsCache = r.data.mindmaps || [];
   renderList();
 }
 
@@ -141,7 +147,9 @@ function renderList() {
     row.querySelector(".del").onclick = async (e) => {
       e.stopPropagation();
       if (!confirm(`Delete mind map "${m.title}"? Its knowledge leaves the corpus too.`)) return;
-      await fetch(`/api/v1/documents/${m.id}`, { method: "DELETE", headers: headers() });
+      const res = await window.DC.req(`/api/v1/documents/${m.id}`, { method: "DELETE" });
+      // never destroy the open editor for a delete the server refused
+      if (!res.ok) return;
       if (m.id === currentId) { currentId = null; destroyMind(); setStatus("no map"); }
       toast("Mind map deleted");
       refreshList();
@@ -313,47 +321,80 @@ function initMind(data) {
   window.addEventListener("pointerup", () => { altPan = null; }, true);
 }
 
-let saveInFlight = false;
-async function saveNow() {
-  if (!mind || !dirty) return;
-  if (saveInFlight) return;   // markDirty's timer re-fires after we finish
-  saveInFlight = true;
-  dirty = false;
-  const data = mind.getData();
-  data.dcTheme = themeKey;
-  data.direction = mind.direction;
-  data.dcTag = mind.dcTag || "";
-  setStatus("saving…");
-  let resp;
-  try {
-    resp = await fetch(
-      currentId ? `/api/v1/mindmaps/${currentId}` : "/api/v1/mindmaps",
-      { method: currentId ? "PUT" : "POST", headers: headers(),
-        body: JSON.stringify({ data }) });
-  } catch (e) {
-    dirty = true; setStatus("save failed — offline?"); return;
-  } finally {
-    saveInFlight = false;   // without this, one network error bricks autosave
+// A save is bound to the map it started on. `currentId` is the map the EDITOR
+// is showing and can change while a request is in flight, so the save must
+// never write `currentId` back from its own response — that used to snap it to
+// the previous map and every later edit was then PUT onto that map's document,
+// silently overwriting it with the content of the one on screen.
+let savePromise = null;   // the in-flight save, so callers can actually wait
+
+function saveNow() {
+  if (savePromise) {
+    // already saving: chain, so `await saveNow()` waits for a settled state
+    return savePromise.then(() => (dirty ? saveNow() : undefined));
   }
-  if (!resp.ok) { setStatus("save failed — check token"); dirty = true; return; }
-  const out = await resp.json();
-  if (dirty) setTimeout(saveNow, 300);   // edits made while the POST ran
-  const isNew = !currentId;
-  currentId = out.id;
-  setStatus("saved ✓ (in your knowledge base)");
-  knownTags(true);   // node tags may have changed the app-wide tag list
-  if (isNew) refreshList(); else {
-    const m = mapsCache.find(x => x.id === currentId);
-    if (m && m.title !== out.title) { m.title = out.title; renderList(); }
-  }
+  if (!mind || !dirty) return Promise.resolve();
+  savePromise = (async () => {
+    dirty = false;
+    const savingId = currentId;          // bound for the whole request
+    const data = mind.getData();
+    data.dcTheme = themeKey;
+    data.direction = mind.direction;
+    data.dcTag = mind.dcTag || "";
+    setStatus("saving…");
+    let resp;
+    try {
+      resp = await fetch(
+        savingId ? `/api/v1/mindmaps/${savingId}` : "/api/v1/mindmaps",
+        { method: savingId ? "PUT" : "POST", headers: headers(),
+          body: JSON.stringify({ data }) });
+    } catch (e) {
+      dirty = true; setStatus("save failed — offline?"); return;
+    }
+    if (!resp.ok) {
+      setStatus(errText(await resp.json().catch(() => ({})))
+                || "save failed — check token");
+      dirty = true; return;
+    }
+    const out = await resp.json().catch(() => null);
+    if (!out) { dirty = true; setStatus("save failed — bad response"); return; }
+    if (savingId === null && currentId === null) {
+      currentId = out.id;                // adopt the new id only if still ours
+    }
+    if (currentId !== savingId && !(savingId === null && currentId === out.id)) {
+      // the user switched maps mid-save: that save is complete and correct for
+      // its own map, but nothing about it applies to what is on screen now
+      refreshList();
+      return;
+    }
+    setStatus("saved ✓ (in your knowledge base)");
+    knownTags(true);   // node tags may have changed the app-wide tag list
+    if (savingId === null) refreshList();
+    else {
+      const m = mapsCache.find(x => x.id === currentId);
+      if (m && m.title !== out.title) { m.title = out.title; renderList(); }
+    }
+  })().finally(() => { savePromise = null; });
+  return savePromise;
 }
 
 async function openMap(id) {
-  clearTimeout(saveTimer); await saveNow();
-  const resp = await fetch(`/api/v1/mindmaps/${id}`, { headers: headers() });
-  if (!resp.ok) return;
+  clearTimeout(saveTimer);
+  await saveNow();                       // now genuinely waits
+  let resp;
+  try {
+    resp = await fetch(`/api/v1/mindmaps/${id}`, { headers: headers() });
+  } catch (e) {
+    toast("Could not open that map — offline?", "error"); return;
+  }
+  if (!resp.ok) {
+    toast(errText(await resp.json().catch(() => ({}))) || "Could not open that map",
+          "error");
+    return;
+  }
   const m = await resp.json();
   currentId = id;
+  dirty = false;                         // the incoming map is clean
   initMind(m.data && m.data.nodeData ? m.data : ME.new(m.title || "Untitled"));
   setStatus("saved ✓");
   renderList();
@@ -361,14 +402,21 @@ async function openMap(id) {
 
 // ----------------------------------------------------------------- toolbar
 async function newMap() {
-  clearTimeout(saveTimer); await saveNow();
+  clearTimeout(saveTimer);
+  await saveNow();                       // flush the current map FIRST
   window.DC.promptModal("New mind map", {
     label: "Central topic of the new map", value: "New idea",
     okText: "Create",
-    onOk: (topic) => {
+    onOk: async (topic) => {
+      // flush again: the prompt was open, and anything still in flight belongs
+      // to the OLD map. Only then detach, or the new map's first save would be
+      // a PUT onto the previous map's document.
+      clearTimeout(saveTimer);
+      await saveNow();
       currentId = null;
       initMind(ME.new(topic));
-      dirty = true; saveNow();
+      dirty = true;
+      saveNow();
     },
   });
 }
@@ -544,9 +592,10 @@ document.getElementById("mm-file-menu").querySelectorAll("[data-act]").forEach(b
       clearTimeout(saveTimer); await saveNow();
       const data = mind.getData();
       data.nodeData.topic += " (copy)";
-      const resp = await fetch("/api/v1/mindmaps", {
-        method: "POST", headers: headers(), body: JSON.stringify({ data }) });
-      if (resp.ok) { toast("Duplicated"); refreshList(); }
+      const res = await window.DC.req("/api/v1/mindmaps", {
+        method: "POST", body: JSON.stringify({ data }) });
+      if (!res.ok) return;          // a failed duplicate was entirely silent
+      toast("Duplicated"); refreshList();
     } else if (act === "maptags") {
       mapTagsModal();
     } else if (act === "import") {
@@ -556,10 +605,10 @@ document.getElementById("mm-file-menu").querySelectorAll("[data-act]").forEach(b
         try {
           const data = JSON.parse(await input.files[0].text());
           if (!data.nodeData || !data.nodeData.topic) throw new Error("no nodeData");
-          const resp = await fetch("/api/v1/mindmaps", {
-            method: "POST", headers: headers(), body: JSON.stringify({ data }) });
-          if (!resp.ok) throw new Error("save failed");
-          const out = await resp.json();
+          const res = await window.DC.req("/api/v1/mindmaps", {
+            method: "POST", body: JSON.stringify({ data }) });
+          if (!res.ok) return;
+          const out = res.data;
           toast("Imported into your knowledge base");
           await refreshList(); openMap(out.id);
         } catch (e) { toast("Import failed: " + e.message, "error"); }
@@ -1319,7 +1368,20 @@ document.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("beforeunload", (e) => {
-  if (dirty) { saveNow(); e.preventDefault(); }
+  if (!dirty || !mind) return;
+  // A normal fetch is aborted when the page goes away, so the edits were lost
+  // even though the browser had just warned they might be. keepalive lets the
+  // request outlive the document; the dialog then only covers a failed send.
+  const data = mind.getData();
+  data.dcTheme = themeKey;
+  data.direction = mind.direction;
+  data.dcTag = mind.dcTag || "";
+  try {
+    fetch(currentId ? `/api/v1/mindmaps/${currentId}` : "/api/v1/mindmaps",
+          { method: currentId ? "PUT" : "POST", headers: headers(),
+            body: JSON.stringify({ data }), keepalive: true });
+  } catch (err) { /* nothing more we can do on the way out */ }
+  e.preventDefault();
 });
 
 // ------------------------------------------------------------------ boot

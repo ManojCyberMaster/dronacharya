@@ -16,20 +16,60 @@ from .config import Config
 _REMOTE_DOWN = False   # per-process: first unreachable check skips later tries
 
 
+class RemoteRejected(RuntimeError):
+    """The server was reached and REFUSED the request (4xx/5xx).
+
+    Distinct from unreachable: falling back to a local write here would report
+    success for work the server rejected, and sync would then carry the same
+    rejected content to it anyway. Callers must surface this, not swallow it.
+    """
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(detail or f"server returned HTTP {status}")
+        self.status = status
+        self.detail = detail
+
+
+def _error_detail(body: bytes) -> str:
+    """FastAPI puts `detail` as a string OR a list of {msg, loc} objects."""
+    import json as json_mod
+
+    try:
+        detail = json_mod.loads(body).get("detail")
+    except Exception:  # noqa: BLE001 — not JSON: nothing to extract
+        return ""
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        return "; ".join(d.get("msg", str(d)) if isinstance(d, dict) else str(d)
+                         for d in detail)
+    if isinstance(detail, dict):
+        return detail.get("msg", "")
+    return ""
+
+
 def remote_api(config: Config, path: str, payload: dict, timeout: int = 90,
                *, skip: bool = False) -> dict | None:
     """POST to the configured home server; None when unreachable (caller
     falls back to fully-local operation — offline-first, by design).
     A 3s TCP preflight keeps offline laptops instant: without it, a server
-    that silently drops packets stalls every command for the full timeout."""
+    that silently drops packets stalls every command for the full timeout.
+
+    Raises RemoteRejected when the server answered with an error — that is a
+    decision, not an outage, and must not be silently downgraded to a local
+    write that then reports success.
+    """
     global _REMOTE_DOWN
     import json as json_mod
     import socket
+    import urllib.error
     import urllib.request
     from urllib.parse import urlparse
 
+    from .sync.client import sync_disabled
+
     if (skip or _REMOTE_DOWN or config.deployment.role != "client"
-            or not config.server.remote_url):
+            or not config.server.remote_url or sync_disabled()):
         return None
     u = urlparse(config.server.remote_url)
     try:
@@ -48,6 +88,9 @@ def remote_api(config: Config, path: str, payload: dict, timeout: int = 90,
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json_mod.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # reached the server and it said no — never fall back silently
+        raise RemoteRejected(e.code, _error_detail(e.read() or b"")) from e
     except Exception:  # noqa: BLE001 — offline / server down / auth mismatch
         return None
 
@@ -71,8 +114,11 @@ class AskOutcome:
 def ask_remote(config: Config, question: str, *,
                no_save: bool = False) -> AskOutcome | None:
     """Server half; None when no server is configured/reachable."""
-    remote = remote_api(config, "/ask",
-                        {"question": question, "no_save": no_save})
+    try:
+        remote = remote_api(config, "/ask",
+                            {"question": question, "no_save": no_save})
+    except RemoteRejected:
+        return None   # a read: answering locally instead is honest, not a lie
     if remote is None:
         return None
     return AskOutcome(
@@ -114,9 +160,12 @@ def save_vetted_answer(config: Config, question: str, payload: dict,
     """Persist a user-approved low-confidence answer on whichever side
     answered it."""
     if origin == "server":
-        return remote_api(config, "/ask/save",
-                          {"question": question, "payload": payload,
-                           "provider": provider}) is not None
+        try:
+            return remote_api(config, "/ask/save",
+                              {"question": question, "payload": payload,
+                               "provider": provider}) is not None
+        except RemoteRejected:
+            return False   # a write: report the refusal, never claim success
     from .quick import save_quick_answer
 
     save_quick_answer(repo, embedder, config, question, payload, provider,
@@ -129,9 +178,12 @@ def search_remote(config: Config, query: str, *, k: int = 8,
                   show_all: bool = False) -> list[dict] | None:
     """Server half; the threshold was applied with the SERVER's tuned config.
     None when no server is configured/reachable."""
-    remote = remote_api(config, "/search",
-                        {"query": query, "k": k, "tags": tags,
-                         "show_all": show_all}, timeout=30)
+    try:
+        remote = remote_api(config, "/search",
+                            {"query": query, "k": k, "tags": tags,
+                             "show_all": show_all}, timeout=30)
+    except RemoteRejected:
+        return None   # a read: fall back to the local index
     return None if remote is None else remote.get("results", [])
 
 
